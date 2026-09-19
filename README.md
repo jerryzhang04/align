@@ -12,6 +12,32 @@ Face unlock → agent talks the phone onto a stand and the user onto a **floor m
 
 ---
 
+## Research the Chinese 3D posture-scan category (do this)
+
+Before implementing, **search and read** how commercial 3D body / posture scan mirrors work, especially the China B2B gym–rehab–wellness kiosks. Pull anything **public**: product pages, patents, papers, SDKs, GitHub, model cards. If a method is reusable on a **single phone + floor mark + self-rotate**, **use it**. If it needs a turntable, depth rig, or closed weights we don’t have, **copy the assessment list and protocol**, not the hardware.
+
+**Companies / products to look up**
+
+- **Visbody** (Xi’an / 维塑) — depth camera + rotating platform, ~30s 360° mesh, ~9–10 static posture tests, shoulder ROM, history avatars. Sites: visbody.com, visbodytech.cn
+- **Xianku** (仙库, Shenzhen) — infrared structured light, 1:1 reconstruction, large posture/spine screening lists. Sites: xianku3d.com, xianku.com
+- **Sennotech** (创跖 / related posture SaaS) — **closest to us**: RGB, front/side/back, landmark classifiers, exercise suggestions, often **no turntable**. Site: sennotech.com
+- **MotiPhysio / PAViR** (Korea, sold in China) — RGB-D skeleton; **published validation vs EOS X-ray** (search PAViR posture EOS). Papers are the honesty check on which angles are real.
+
+Their shared pipeline (this is what to implement): **guided capture → pose landmarks and/or a 3D body → calibrated coordinates → angles and symmetry → rules or a small classifier → report + compare to last scan.**
+
+**Open source / papers to leverage (search current repos and licenses)**
+
+- **MediaPipe Pose / BlazePose** (33 landmarks, live on phone). Use 2D per view for angles; treat built-in 3D `z` as **relative**, not millimetres.
+- **MMPose** (OpenMMLab) — stronger 2D/3D pose if a laptop/server can run it.
+- **OpenCap** (Stanford, `stanfordnmbl/opencap-core`, Apache-2.0) — two+ phones → 3D markers → **OpenSim** kinematics. Use as the **method reference** for 3D lifting; hosted OpenCap cloud has its own terms. We have **one** phone, so adapt ideas (sync, IK constraints), don’t require their full rig unless a second phone appears.
+- **OpenSim** — joint-angle layer once you have 3D markers.
+- **SMPL / SMPL-X** — 3D body for the 100/100 avatar. **Research license is non-commercial**; Meshcapade for commercial. Prefer a simple rigged skeleton if SMPL isn’t clearly allowed.
+- Markerless motion-capture **reviews** (accuracy by joint and plane) — size confidence intervals, don’t fake millimetres.
+
+**What to steal vs skip:** steal **named tests**, **audio+silhouette protocol**, **reject-bad-frame**, **L/R degrees**, **longitudinal compare**, **shoulder raise as a dynamic**. Skip needing their motorized plate or claiming X-ray/spine-Cobb precision. If you find an **open posture-angle library or Chinese open-source 体态评估**, plug it in.
+
+---
+
 ## Capture setup (get this right)
 
 - **Floor marker** (tape/X) = where the **feet** stay. All four views happen **on that mark**. They rotate themselves; they do not walk around.
