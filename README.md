@@ -1,6 +1,16 @@
 # idontknowthenameyet
 
-**Build plan:** [Align implementation specification](docs/BUILD_SPEC.md) covers the Expo/iOS frontend, native pose pipeline, accuracy gates, OMNI/ElevenLabs integration, data contracts, and implementation milestones. It supersedes unsupported measurement and identity assumptions in the original concept below. See also [research and sponsor guidance](docs/research-chinese-scanners-and-omni.md).
+**Current build:** a Windows/Mac **web app** (`npm run dev`). Camera is whatever the device exposes. Pose stays in the browser. Coaching uses **OMNI only** — no ElevenLabs. See [Align implementation specification](docs/BUILD_SPEC.md).
+
+```text
+npm install
+copy .env.example .env
+npm run dev
+```
+
+On Mac/Linux use `cp .env.example .env`. Open http://127.0.0.1:5173 in Chrome or Edge. Put the OMNI key in `.env` (`OMNI_API_KEY`); never commit it. Capture still runs without the key.
+
+**Build plan:** [Align implementation specification](docs/BUILD_SPEC.md) is web-first. Expo/iPhone UI is later packaging, not the current architecture. See also [research and sponsor guidance](docs/research-chinese-scanners-and-omni.md).
 
 Working title. Feed **this entire file** to GPT-6 Astra / Codex as the product spec. Infer a shippable mobile/web app. Do not wait for another doc.
 

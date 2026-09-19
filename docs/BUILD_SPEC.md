@@ -1,106 +1,111 @@
 # Align: implementation specification
 
-Status: agreed product direction translated into an implementation plan; implementation and provider validation remain outstanding. Updated 2026-09-19.
+Status: web-first architecture in progress. Provider credentials and live OMNI validation remain outstanding. Updated 2026-09-19.
 
-Read alongside [research and sources](research-chinese-scanners-and-omni.md). This specification supersedes unsupported measurement and identity assumptions in the original README. It does not claim clinical validation or confirmed sponsor eligibility.
+Read alongside [research and sources](research-chinese-scanners-and-omni.md). This specification supersedes unsupported measurement and identity assumptions in the original README, and it supersedes the earlier iPhone-native/ElevenLabs plan. It does not claim clinical validation or confirmed sponsor eligibility.
 
 ## 1. Product and priorities
 
-Align is an iPhone-first, Expo-built posture and movement screening app. The user places their phone on a stand, follows spoken guidance through four standing views, sees measured alignment and an estimated 3D skeleton, and asks questions aloud. Returning users compare equivalent measurements over time.
+Align is a **web app** that runs in Chrome or Edge on **Windows and Mac**, and on any other device that can open the site and share a camera. It uses **whatever camera the device exposes** (laptop webcam, USB camera, or phone browser camera). The user frames a full-body standing view, follows guidance through four standing views, sees measured alignment and an estimated skeleton, and can ask questions aloud.
+
+Spoken coaching uses **OMNI only**. Do not add ElevenLabs or any other TTS/STT vendor. If OMNI returns audio, play it. If it returns text only, show the text. Never pretend a second vendor is OMNI.
 
 The product must demonstrate one complete real capture, measurement, and multimodal coaching loop before adding breadth. No diagnosis, invented angles, muscle weakness claims, or medical-perfect posture score.
 
 Priority order:
 
-1. Real iPhone camera and native pose pipeline; real OMNI image/audio request; real ElevenLabs playback.
+1. Real device camera in the browser; real local pose; real OMNI image/audio request.
 2. Guided four-view static scan, understandable results, and saved local history.
 3. Squat, single-leg balance/reach, and overhead reach/hinge.
 4. Visual refinement and longitudinal comparison.
-5. Optional account synchronization and additional assessments only after the core demonstration passes.
+5. Optional accounts and extra assessments only after the core demonstration passes.
+
+**Expo / native iPhone shell is later work.** After this web architecture is solid, wrap or restyle it as a more native-feeling app. That pass is UI and packaging, not a second measurement engine. Do not block the current build on Xcode, native pose modules, or App Store signing.
 
 Custom face recognition, full photorealistic reconstruction, body composition, pressure measurement, diagnosis, and automatic exercise prescriptions are outside the first build.
 
 ## 2. Target architecture
 
-Use an Expo React Native application in TypeScript with a development build for iOS. Expo Go is not the target because pose processing requires native integration. Use Expo Router for navigation. Keep a small Node/TypeScript backend independent of the mobile client so both contributors can work against a defined contract.
+Use a TypeScript monorepo that runs on Windows and Mac with Node and npm. The browser owns camera, pose, capture state, and metrics. A small Node backend is the only process that holds OMNI credentials.
 
 ```text
-iPhone camera -> native pose engine -> quality gates -> metric engine
-                       |                                  |
-                       +-> live overlay                    +-> scan/history/3D view
-iPhone microphone + selected frame + metric context
-                       -> backend -> sponsor OMNI -> coaching text
-                                               -> ElevenLabs -> phone audio
+Device camera (getUserMedia)
+    -> MediaPipe Pose in the browser -> quality gates -> metric engine
+            |                                      |
+            +-> live overlay                       +-> results / history / skeleton
+
+Device microphone + selected frame + metric context
+    -> apps/api -> sponsor OMNI -> coaching text
+                                -> coaching audio, only if OMNI returns audio
 ```
 
 The local metric engine owns every numerical result. Cloud coaching receives already defined measurements and capture context. No cloud request is required to update the live skeleton or local capture gates.
 
-Recommended repository layout:
+Repository layout:
 
 ```text
-apps/mobile/        Expo app, screens, capture and audio controllers
-apps/api/           authenticated provider adapters and streaming routes
+apps/web/           Vite + React web app (camera, pose, capture, results)
+apps/api/           OMNI adapter and /v1/coach/turn
 packages/contracts/ request/response schemas and shared types
 packages/metrics/   pure geometry, quality aggregation, comparisons
-modules/pose/      iOS frame processing and pose bridge
-docs/              research, architecture, evaluation and demo instructions
+docs/               research, this spec, demo notes
 ```
 
-Start with npm workspaces. Pin compatible versions after checking the selected Expo SDK and native pose dependency together; do not choose versions independently. Commit the lockfile.
+npm workspaces. Pin compatible versions together. Commit the lockfile. Scripts must work in PowerShell and in macOS/Linux shells; do not depend on bash-only syntax.
 
-## 3. Native camera and pose feasibility gate
+## 3. Camera and pose feasibility gate
 
-First build a physical-device prototype before the rest of the UI. Test an iOS MediaPipe Pose Landmarker integration behind an Expo native module. The module owns a camera capture session, preview, and inference; expose landmark results and occasional selected images to JavaScript. Do not start a second camera session through another library at the same time.
+First prove a physical-device loop in the browser: camera permission, live preview, MediaPipe Pose Landmarker, overlay. Use the default camera if there is only one; if there are several, let the user pick. Do not require a phone, a rear camera, or `facingMode: environment`.
 
-If a maintained frame-processing integration proves faster to adopt, retain the same bridge contract. Confirm package license, iOS support, Expo compatibility, landmark mapping, and build reproducibility before accepting it. A substitute pose model must advertise its landmark schema and disable unsupported measurements.
+Load pose with a GPU delegate, then fall back to CPU if needed so Windows iGPU and Mac machines both run. Drop old frames rather than queueing inference. Keep pixels in the browser; send only compact landmarks through the metric engine at a bounded rate.
 
-Bridge result: frame timestamp, image dimensions, orientation/mirroring transform, landmark schema/version, 2D landmarks and visibility/presence where available, optional estimated 3D landmarks, and inference timing. Drop old frames rather than building an inference queue. Keep raw frames native; send only compact landmarks to JavaScript at a bounded rate.
+Selected stills for OMNI are JPEG frames captured from the same video element, resized and bounded. Microphone audio for coaching is recorded as WAV in the browser so Mac and Windows Chrome/Edge share one format.
 
-Initial performance targets, not measured claims: pose updates at least 10 Hz on the demo phone, responsive preview near display rate, local feedback under 200 ms p95. Record actual performance, device model, and thermal behavior during a full session. Reduce inference resolution/rate before compromising capture stability.
+Initial performance targets, not measured claims: pose updates at least 10 Hz on the demo machine, responsive preview, local feedback under 200 ms p95. Record actual performance during a full session. Reduce inference resolution/rate before compromising capture stability.
 
 ## 4. Frontend experience
 
-Visual direction: calm, precise, approachable. Warm neutral background, dark legible text, a single teal accent, and clear diagrams. Reserve warning colors for actionable capture problems. Never communicate state by color alone. Prefer generous spacing, native controls, safe-area-aware layouts, Dynamic Type, screen-reader labels, and large touch targets.
+Visual direction: calm, precise, approachable. Warm neutral background, dark legible text, a single teal accent, and clear diagrams. Reserve warning colors for actionable capture problems. Never communicate state by color alone.
 
 ### Screens
 
 | Screen | Content and behavior |
 | --- | --- |
 | Home | Start scan, recent scan summary, history, privacy/settings. No fabricated sample result shown as user data. |
-| Consent | Separate explanations for local pose processing and sending selected image/audio to cloud services. Allow local scan without cloud coaching. |
-| Setup | Stand/floor-mark instructions, fitted clothing guidance, full-body silhouette, camera/microphone permission recovery. |
-| Capture | Landscape camera, minimal overlay, current view, hold progress, one prominent correction, coach transcript, pause/stop and voice button. |
+| Consent | Separate explanations for local pose processing and sending selected image/audio to OMNI. Allow local scan without cloud coaching. |
+| Setup | Camera picker, floor-mark / distance guidance, fitted clothing, full-body silhouette, camera/microphone permission recovery. |
+| Capture | Live camera, minimal overlay, current view, hold progress, one prominent correction, coach transcript, pause/stop and push-to-talk. |
 | Processing | Local aggregation status; cloud coaching status separately. No fake progress percentage. |
-| Results | Capture quality, supported measurements with view and definition, estimated 3D skeleton, expandable explanations, retry incomplete views. |
-| Movement | Short demonstration and spoken instructions, rep/state progress, measured movement summary. |
+| Results | Capture quality, supported measurements with view and definition, estimated skeleton, expandable explanations, retry incomplete views. |
+| Movement | Later. Short demonstration, rep/state progress, measured movement summary. |
 | History/detail | Comparable measurements, dates, capture protocol/model versions, excluded comparisons explained. |
 
-Use portrait for ordinary navigation and landscape for capture. Test orientation transitions on device. Setup must be possible while holding the phone; capture must be possible after stepping away. Provide a visible countdown and spoken prompts. Haptics can help while handling the phone but cannot be the only cue when it is on a stand.
+Do not require landscape-only iPhone layout. Prefer a framing guide that works for a laptop webcam across the room or a phone on a stand. Setup must be possible while handling the device; capture must be possible after stepping away. Provide a visible countdown and on-screen prompts. Local text can drive routine “turn / hold / retry” states. Contextual spoken answers come from OMNI.
 
-Initial 3D view: a simple proportioned skeleton with orbit/reset controls and the source-view measurement overlay. Benchmark an Expo-compatible renderer before committing to it. Preserve a 2D results screen if rendering fails. Label any target pose “illustrative alignment reference”; it is not a universally ideal body or a clinical correction.
+Initial skeleton view: a simple proportioned 2D/3D stick figure with the source-view overlay. Keep a 2D results screen if a richer renderer fails. Label any target pose “illustrative alignment reference.”
 
 ## 5. Capture protocol and state machine
 
-Phone fixed on a stable stand, landscape, lens approximately level at hip height, whole person including feet visible. The user keeps their feet near a floor mark and turns in place. Do not claim that the mark establishes metric calibration.
+Camera is fixed. The user stands far enough for hair-to-shoes framing, keeps their feet near a floor mark, and turns in place. Do not claim that the mark establishes metric calibration.
 
 ```text
 consent -> permissions -> setup -> front -> right -> back -> left
         -> aggregate -> results -> optional movement -> save
 ```
 
-Each view progresses through coaching, settling, collecting, and accepted states. A bad frame pauses collection; prolonged failure resets only the current hold. Pause/stop cancels outstanding coaching and playback. App backgrounding suspends capture and recording; resuming requires a fresh quality check.
+Each view progresses through coaching, settling, collecting, and accepted states. A bad frame pauses collection; prolonged failure resets only the current hold. Pause/stop cancels outstanding coaching and playback.
 
 Provisional engineering defaults: collect two seconds of stable observations, require at least 15 accepted samples, and expire an incomplete hold after 20 seconds into a retry state. Tune these against actual device data. Visibility thresholds depend on the chosen model and are not probabilities of measurement correctness.
 
 Check full-body framing, required landmarks, person count where supported, temporal movement, side/front orientation, and apparent body-scale changes. Treat these as imperfect checks: pose alone cannot guarantee a foot remains on the floor mark or detect all clothing occlusions. Coach the user rather than pretending these conditions are measured exactly.
 
-Front/back identity and left/right association must use capture state plus explicit orientation transforms, not shoulder ordering alone. At side views, avoid scoring occluded far-side joints. If facing direction cannot be resolved, request confirmation or retry.
+Front/back identity and left/right association must use capture state plus MediaPipe’s anatomical landmark labels, not shoulder ordering alone. At side views, avoid scoring occluded far-side joints. If facing direction cannot be resolved, request confirmation or retry.
 
 ## 6. Measurement definitions and accuracy
 
 All results distinguish observed 2D projected geometry, model-estimated 3D geometry, and unavailable quantities. Store degrees or normalized ratios initially. Do not display millimetres from monocular estimates. User height alone does not solve perspective, depth, and landmark-location error.
 
-Convert normalized landmarks into image pixel coordinates before angle calculations: x = normalized_x * width, y = normalized_y * height. Apply orientation consistently. Correct camera roll only when a tested calibration method is available; otherwise require a level phone and disclose this source of error.
+Convert normalized landmarks into image pixel coordinates before angle calculations: x = normalized_x * width, y = normalized_y * height. Apply orientation consistently.
 
 For points A, B, C, the internal angle at B is acos(clamp(dot(A-B,C-B)/(|A-B||C-B|),-1,1)). Reject near-zero vectors. For a near-horizontal segment, inclination uses atan2(delta_y, delta_x), folded to a documented range after anatomical ordering. Unit-test mirrored and rotated inputs.
 
@@ -124,7 +129,7 @@ An overall 0–100 alignment score is deferred until a documented, versioned rul
 
 Before accuracy claims, collect consented repeated scans from at least five volunteers if feasible, with three repetitions each. This is an engineering pilot, not clinical validation. Compare supported projected angles against manual annotations on the same source frames, using the same definitions. Record absolute error, signed bias, failures, and repeatability; do not invent acceptance numbers after observing results.
 
-Provisional go/no-go target for showing degree-level findings: median absolute error <= 5 degrees against those annotations, with per-metric results and outliers disclosed. This target is not a promised accuracy, and same-frame agreement does not validate anatomy. Disable or label exploratory any metric that fails. Test deliberate camera roll, loose clothing, occlusion, cropping, mirrored preview, side-view ambiguity, and low light. A numerical improvement over time is not meaningful unless it exceeds measured repeatability and protocol conditions match.
+Provisional go/no-go target for showing degree-level findings: median absolute error <= 5 degrees against those annotations, with per-metric results and outliers disclosed. This target is not a promised accuracy, and same-frame agreement does not validate anatomy. Disable or label exploratory any metric that fails. Test camera roll, loose clothing, occlusion, cropping, side-view ambiguity, low light, and both Windows and Mac browsers. A numerical improvement over time is not meaningful unless it exceeds measured repeatability and protocol conditions match.
 
 ## 7. Movement phase
 
@@ -132,23 +137,23 @@ After static capture works, add slow squat (2–3 reps), single-leg balance/reac
 
 Squat: projected knee flexion, trunk lean, frontal knee tracking only in the relevant view. Balance: observed hold duration and trunk/hip landmark movement, not plantar pressure. Reach: observed arm elevation. Hinge: trunk/hip angle changes; do not claim spinal rounding from sparse landmarks. Use qualitative feedback only when tied to available measurements. Stop/retry instructions take precedence over encouragement if the user reports pain or asks to stop.
 
-## 8. OMNI and ElevenLabs integration
+## 8. OMNI integration
 
-The sponsor repository identifies YibuAPI as the credit provider. The exact base URL, key destination, model ID, accepted multimodal message format, and streaming support must be confirmed before sending credentials or building a provider-specific payload. Key appearance is not sufficient evidence. This is the first external integration gate.
+The sponsor repository identifies YibuAPI as the credit provider. Default adapter target is the OpenAI-compatible endpoint `https://yibuapi.com/v1`. The local API listens on `127.0.0.1:8788` so it does not collide with other local tools. The exact key destination, model ID, accepted multimodal message format, streaming support, and native audio output must still be confirmed with the issued credential. Key appearance is not sufficient evidence. This is the first external integration gate.
 
-The OMNI adapter must accept actual audio and selected images in the same contextual interaction, plus compact measurement facts. Browser/device speech transcription followed by a text-only call is not our intended proof of OMNI audio understanding. Do not substitute another model silently.
+The OMNI adapter must accept actual audio and selected images in the same contextual interaction, plus compact measurement facts. Browser speech transcription followed by a text-only call is **not** the intended proof of OMNI audio understanding. Do not substitute another model or ElevenLabs silently.
 
-ElevenLabs generates speech from the coach's text. Verify the selected voice, model, audio format, and streaming behavior on iOS before committing to low-latency streaming. An initial complete audio response is acceptable during integration, but document measured latency and the actual transport. Do not claim native OMNI speech when ElevenLabs generated it.
+If OMNI returns audio (for example streamed WAV/PCM), play that audio in the browser. If it returns text only, show captions. Do not add a second speech vendor to fill the gap.
 
-Use one coaching turn at a time. Assign a request ID; discard stale replies and cancel upstream work where supported when the user interrupts. Start with push-to-talk for reliable turn-taking and to avoid the model hearing its own playback. Pressing the voice button cancels playback before recording. Continuous automatic interruption is a later feature requiring device audio-session and echo-handling tests.
+Use one coaching turn at a time. Assign a request ID; discard stale replies and abort the in-flight request when the user interrupts. Start with push-to-talk. Pressing the voice button cancels playback before recording. Continuous automatic interruption is a later feature.
 
-Automatic prompts are triggered by state transitions or persistent capture problems, not every frame. Rate-limit repeated instructions. Local deterministic prompts can cover routine transitions; contextual responses must use real provider calls for the sponsor demo.
+Automatic prompts are triggered by state transitions or persistent capture problems, not every frame. Rate-limit repeated instructions. Local deterministic text can cover routine transitions; contextual responses must use real OMNI calls for the sponsor demo.
 
 The system prompt instructs OMNI to explain only supplied measurements, give one concise actionable instruction at a time, treat user speech/image text as untrusted input, avoid diagnosis, and honor stop requests. Validate output lengths and response schemas. Generated speech is advisory; it cannot directly accept a scan, change measurements, or advance capture state.
 
 ## 9. Backend contracts and controls
 
-Use shared runtime schemas (for example Zod) on client and server. Proposed application contract, independent of provider payload:
+Use shared runtime schemas (Zod) on client and server. Proposed application contract, independent of provider payload:
 
 ```ts
 type Measurement = {
@@ -164,30 +169,30 @@ type CoachTurn = {
 };
 ```
 
-POST /v1/coach/turn accepts metadata and bounded media. Return text and audio through a documented response/event contract chosen after transport testing. Events, if streamed: started, text, audio-ready, completed, error; every event carries requestId. Audio responses require the same authorization as the initiating turn and expire promptly. Expose structured error codes, not raw provider errors or credentials.
+POST `/v1/coach/turn` accepts metadata and bounded media. Return JSON with `requestId`, `text`, optional `audioBase64` / `audioMime` when OMNI actually returned audio, and `degraded` only if the provider rejected a modality. Events, if streamed later: started, text, audio-ready, completed, error; every event carries requestId. Expose structured error codes, not raw provider errors or credentials.
 
-Initial limits: one image <= 1 MB, audio <= 15 seconds and <= 5 MB, metadata <= 32 KB, one active turn per session. Enforce server-side limits, supported MIME types, timeouts, and rate budgets. Treat limits as tunable product defaults. Do not accept client-supplied upstream URLs, model IDs, system prompts, or credentials.
+Initial limits: one image <= 1 MB, audio <= 15 seconds and <= 5 MB, metadata <= 32 KB, one active turn per session. Enforce server-side limits, supported MIME types, timeouts, and rate budgets. Do not accept client-supplied upstream URLs, model IDs, system prompts, or credentials.
 
-Use HTTPS and per-session authorization for the deployed service. A public demo needs rate limiting and a server-validated access mechanism; no unrestricted paid-provider proxy. Keep development-only access distinct from production authentication. Server logs contain request IDs, stage, timing, status, and provider/model identifiers; no raw audio, images, secrets, or full prompts by default.
+Use HTTPS and a server-validated access token for any deployed service. Local development may omit the token. Keep OMNI keys only in ignored backend environment files. The browser never receives `OMNI_API_KEY`. Server logs contain request IDs, stage, timing, status, and provider/model identifiers; no raw audio, images, secrets, or full prompts by default.
 
 ## 10. Data and privacy
 
-Local-first storage using Expo-compatible SQLite: profiles, scans, measurements, protocol/model versions, quality summaries, and comparisons. Use generated profile IDs and optional display names. Face ID may later unlock the app through system authentication, but it does not identify different people or provide face embeddings. Multiple users select their profile explicitly.
+Local-first storage in the browser (localStorage/IndexedDB): profiles, scans, measurements, protocol/model versions, quality summaries, and comparisons. Use generated profile IDs and optional display names. No face embeddings. Multiple users select their profile explicitly.
 
 Do not require birthday, weight, or face enrollment for the core scan. Optional height is context only until a calibrated measurement use is implemented. Store summaries by default; retain raw frames/audio only with separate opt-in and a clear deletion mechanism. In-memory landmark windows are discarded after aggregation unless explicitly saved for consented evaluation.
 
-Cloud media handling and provider retention policies must be verified and summarized before public use. Deleting local history must remove related local artifacts; do not promise deletion of provider-held data without confirmed support. Keys exist only in ignored backend environment files or deployment secrets. Mobile public environment variables contain only non-secret configuration.
+Cloud media handling and provider retention policies must be verified and summarized before public use. Deleting local history must remove related local artifacts; do not promise deletion of provider-held data without confirmed support.
 
 ## 11. Testing and release gates
 
 - Geometry: synthetic known angles, aspect ratios, zero vectors, left/right, mirroring and orientation.
 - Capture: deterministic replay fixtures for accepted holds, dropouts, re-entry, cancellation, and invalid views.
 - Providers: schema construction, timeout/error mapping, payload limits, stale-response cancellation; live smoke tests separately with explicit cost bounds.
-- Mobile: real camera/audio permissions, orientation, background/resume, silent mode/audio route behavior, playback cancellation and denied permissions.
-- End-to-end: real four-view scan -> stored supported measurements -> real multimodal question -> ElevenLabs speech -> reopen history.
-- Performance: log actual p50/p95 local inference and coaching latency on the demo phone. Initial spoken-response goal is under 4 seconds median after recording ends; report actual results if missed.
-- Security: check staged changes and browser/mobile output for credentials; verify authentication and rate limits before deployment.
-- Accessibility: screen-reader labels, readable contrast/text, captions, no color-only state, and controls reachable without precise gestures.
+- Web: camera/audio permissions, camera switching, background/resume, playback cancellation, denied permissions, Chrome/Edge on Windows and Mac.
+- End-to-end: real four-view scan -> stored supported measurements -> real multimodal question -> OMNI reply (audio if provided) -> reopen history.
+- Performance: log actual p50/p95 local inference and coaching latency on the demo device. Initial spoken/text response goal is under 4 seconds median after recording ends; report actual results if missed.
+- Security: check staged changes and browser/network output for credentials; verify authentication and rate limits before deployment.
+- Accessibility: screen-reader labels, readable contrast/text, captions, no color-only state.
 
 Failure to reach a target means narrow the claim or scope; never replace a live demonstration with unlabelled prerecorded or fabricated output.
 
@@ -195,21 +200,26 @@ Failure to reach a target means narrow the claim or scope; never replace a live 
 
 | Milestone | Deliverable | Exit condition |
 | --- | --- | --- |
-| A: contracts and feasibility | Expo workspace, native pose spike, provider verification, audio playback spike | Actual iPhone landmarks and one actual image+audio OMNI turn voiced by ElevenLabs |
-| B: scan | Setup/capture screens, quality gates, metric engine | Four views complete with failures handled and supported measurements retained |
+| A: web architecture | Monorepo, browser pose spike, metric engine, OMNI adapter | Camera landmarks on Windows and Mac, and one actual image+audio OMNI turn |
+| B: scan | Setup/capture screens, quality gates | Four views complete with failures handled and supported measurements retained |
 | C: results/history | Measurement cards, estimated skeleton, local storage | Saved scan reopens; model/protocol differences are respected |
-| D: coach | Contextual requests, cancellation, captions and spoken transitions | Complete hands-free guided flow with a spoken follow-up |
-| E: movement/polish | Supported drills, visual/accessibility refinement | Physical-device demo reliable through repeated sessions |
-| F: submission | README, architecture, measured limits, provider evidence and demo script | Sponsor selections confirmed and claims match the build |
+| D: coach | Push-to-talk OMNI, cancellation, captions and optional OMNI audio | Contextual follow-up on a completed scan |
+| E: movement/polish | Supported drills, visual/accessibility refinement | Repeated sessions on the demo machine |
+| F: later native UI | High-level Expo/iPhone shell around this architecture | Same metrics and OMNI contract, nicer device UI |
+| G: submission | README, architecture, measured limits, provider evidence and demo script | Sponsor selections confirmed and claims match the build |
 
-Suggested split, to agree with Jerry: one contributor owns mobile/native capture and screens, another backend/provider adapters and shared metrics tests. Agree contracts first. Work on feature branches and merge small reviewed changes; avoid concurrent edits to shared schemas without coordination. Commit secrets only as empty placeholders. No commits or messages should imply the other contributor accepted an assignment.
+Suggested split: one contributor owns the web capture/pose/screens, another the API/OMNI adapter and shared metrics tests. Agree contracts first. Work on feature branches and merge small reviewed changes. Commit secrets only as empty placeholders.
 
 ## 13. Sponsor evidence and demo
 
-Huawei: show actual joint image/audio understanding through the verified OMNI model, an end-to-end edge-device scenario, and clear documentation. ElevenLabs: demonstrate real dynamic speech essential to hands-free use. Expo: demonstrate a native-feeling, attractive iPhone app built with Expo. Eligibility and awards remain organizer decisions.
+Huawei/OMNI: show actual joint image/audio understanding through the verified OMNI model, an end-to-end browser/edge-device scenario, and clear documentation. Eligibility remains an organizer decision.
 
 OpenAI's track additionally requires meaningful OpenAI API use in the product and evidence of Codex's development contribution. The current architecture does not yet include the former. Do not claim this track is satisfied by Codex development alone or add a redundant API call merely for a checkbox.
 
-Demo: open Align on an iPhone -> accept media use -> place phone -> ask about positioning -> hear a scene-aware response -> complete four holds -> inspect a supported finding and estimated skeleton -> ask what the finding means -> hear ElevenLabs explanation -> reopen saved scan. Movement is an extension if time permits.
+Demo: open Align in Chrome or Edge -> accept camera/mic -> choose a camera if needed -> stand in frame -> ask about positioning -> hear or read an OMNI response -> complete four holds -> inspect a supported finding and skeleton -> ask what the finding means -> hear/read the OMNI explanation -> reopen saved scan. Movement is an extension if time permits.
 
-Record build version, real provider/model identities, physical device, measured latency and limitations in the demo notes. Confirm submission track selections and deadlines with the organizers. No App Store release is required by this plan; provision a working physical-device development/internal build early, since signing/distribution can block the demo.
+Record build version, real provider/model identities, device/OS/browser, measured latency and limitations in the demo notes. Confirm submission track selections and deadlines with the organizers.
+
+## 14. Later: Expo / native UI
+
+When the web loop is reliable, a later Expo app can wrap this product for a more native iPhone feel. Keep that work high level: same capture protocol, same metric engine, same OMNI backend. Treat it as UI and device packaging. Do not fork measurement definitions or add ElevenLabs during that pass.

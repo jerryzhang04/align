@@ -1,0 +1,21 @@
+{
+  "name": "align",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/copy-mediapipe.mjs",
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev --workspace=@align/api\" \"npm run dev --workspace=@align/web\"",
+    "build": "npm run build --workspace=@align/metrics && npm run build --workspace=@align/contracts && npm run build --workspace=@align/api && npm run build --workspace=@align/web",
+    "test": "npm run test --workspace=@align/metrics",
+    "start": "npm run start --workspace=@align/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

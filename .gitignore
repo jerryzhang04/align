@@ -20,3 +20,6 @@ scans/
 .idea/
 .vscode/
 *.iml
+*.log
+coverage/
+apps/web/public/mediapipe/
