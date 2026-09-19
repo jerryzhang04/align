@@ -16,7 +16,10 @@
     "iphone:build": "npm run ios:device --workspace=@align/mobile",
     "build": "npm run build --workspace=@align/metrics && npm run build --workspace=@align/contracts && npm run build --workspace=@align/api && npm run build --workspace=@align/web && npm run build --workspace=@align/mobile",
     "test": "node --test scripts/*.test.mjs apps/mobile/plugins/*.node-test.mjs && npm run test --workspace=@align/metrics && npm run test --workspace=@align/api && npm run test --workspace=@align/mobile",
-    "start": "npm run start --workspace=@align/api"
+    "start": "npm run start --workspace=@align/api",
+    "omni:use": "node scripts/omni-profile.mjs",
+    "omni:smoke": "node scripts/coach-smoke.mjs",
+    "omni:models": "node scripts/omni-models.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
