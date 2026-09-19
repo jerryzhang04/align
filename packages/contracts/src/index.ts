@@ -45,6 +45,7 @@ export const coachTurnResponseSchema = z.object({
   audioMime: z.string().optional(),
   model: z.string().optional(),
   degraded: z.boolean().optional(),
+  speechProvider: z.enum(["omni", "none"]),
   limitations: z.array(z.string()).optional(),
 });
 export type CoachTurnResponse = z.infer<typeof coachTurnResponseSchema>;

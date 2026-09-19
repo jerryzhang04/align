@@ -23,3 +23,5 @@ scans/
 *.log
 coverage/
 apps/web/public/mediapipe/
+.expo/
+/apps/mobile/ios/

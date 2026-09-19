@@ -9,7 +9,7 @@ function point(x: number, y: number) {
 }
 
 function frameFrom(points: Record<number, { x: number; y: number }>): PoseFrame {
-  const landmarks = Array.from({ length: 33 }, (_, index) => points[index] ?? { x: 0.5, y: 0.5, visibility: 0.2 });
+  const landmarks: PoseFrame["landmarks"] = Array.from({ length: 33 }, (_, index) => points[index] ?? { x: 0.5, y: 0.5, visibility: 0.2 });
   for (const [index, value] of Object.entries(points)) {
     landmarks[Number(index)] = { ...value, visibility: 1 };
   }

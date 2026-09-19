@@ -2,9 +2,11 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { coachTurnMetaSchema } from "@align/contracts";
+import { attachCoachVoice } from "./coachVoice.js";
 import { loadEnv } from "./env.js";
 import { ALLOWED_AUDIO, ALLOWED_IMAGE, LIMITS } from "./limits.js";
 import { omniConfigured, omniModel, runOmniTurn } from "./omni.js";
+import { resolveServerAddress } from "./serverConfig.js";
 
 loadEnv();
 
@@ -95,7 +97,7 @@ app.post("/v1/coach/turn", async (c) => {
   try {
     const imageBuffer = Buffer.from(await image.arrayBuffer());
     const audioBuffer = Buffer.from(await audio.arrayBuffer());
-    const result = await runOmniTurn(
+    const omniResult = await runOmniTurn(
       {
         requestId: meta.requestId,
         stage: meta.stage,
@@ -108,6 +110,7 @@ app.post("/v1/coach/turn", async (c) => {
       },
       controller.signal,
     );
+    const result = attachCoachVoice(omniResult);
     return c.json({
       requestId: meta.requestId,
       text: result.text,
@@ -115,6 +118,7 @@ app.post("/v1/coach/turn", async (c) => {
       audioMime: result.audioMime,
       model: result.model,
       degraded: result.degraded,
+      speechProvider: result.speechProvider,
     });
   } catch (error) {
     const name = error instanceof Error ? error.name : "";
@@ -134,10 +138,10 @@ app.post("/v1/coach/turn", async (c) => {
   }
 });
 
-const port = Number(process.env.PORT ?? 8788);
+const { hostname, port } = resolveServerAddress(process.env);
 try {
-  serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, () => {
-    console.log(`Align API listening on http://127.0.0.1:${port}`);
+  serve({ fetch: app.fetch, port, hostname }, () => {
+    console.log(`Align API listening on http://${hostname}:${port}`);
   });
 } catch (error) {
   console.error(error);

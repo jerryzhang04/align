@@ -35,6 +35,15 @@ function baseUrl(): string {
   return env("OMNI_BASE_URL", "https://yibuapi.com/v1").replace(/\/$/, "");
 }
 
+/**
+ * Whether to request native speech from the model. Providers that cannot emit
+ * audio reject `modalities: ["text","audio"]` outright, which costs a wasted
+ * round trip before the text fallback. Set OMNI_AUDIO_OUTPUT=false for those.
+ */
+export function audioOutputEnabled(): boolean {
+  return env("OMNI_AUDIO_OUTPUT", "true").toLowerCase() !== "false";
+}
+
 function audioFormat(mime: string): string {
   if (mime.includes("wav")) return "wav";
   if (mime.includes("mpeg") || mime.includes("mp3")) return "mp3";
@@ -68,7 +77,7 @@ function userText(input: OmniTurnInput): string {
   ].join("\n");
 }
 
-function contentParts(input: OmniTurnInput, includeAudio: boolean) {
+export function contentParts(input: OmniTurnInput, includeAudio: boolean) {
   const parts: Array<Record<string, unknown>> = [
     {
       type: "image_url",
@@ -79,7 +88,9 @@ function contentParts(input: OmniTurnInput, includeAudio: boolean) {
     parts.push({
       type: "input_audio",
       input_audio: {
-        data: `data:audio/${audioFormat(input.audioFormat)};base64,${input.audioBase64}`,
+        // OpenAI-compatible providers expect raw base64 here, NOT a data: URI.
+        // Sending a data: URI makes the provider reject the whole request.
+        data: input.audioBase64,
         format: audioFormat(input.audioFormat),
       },
     });
@@ -166,29 +177,31 @@ export async function runOmniTurn(input: OmniTurnInput, signal: AbortSignal): Pr
     { role: "user", content: contentParts(input, true) },
   ];
 
-  const streamingBody = {
-    model,
-    messages,
-    stream: true,
-    stream_options: { include_usage: true },
-    modalities: ["text", "audio"],
-    audio: { voice, format: "wav" },
-    max_tokens: 400,
-    temperature: 0.4,
-  };
-
   const timeout = AbortSignal.any([signal, AbortSignal.timeout(LIMITS.timeoutMs)]);
-  let response = await postOmni(streamingBody, timeout);
 
-  if (response.ok) {
-    const streamed = await readSse(response, input.requestId);
-    if (streamed.text || streamed.audioBase64) {
-      return {
-        text: streamed.text || "I reviewed the frame and measurements.",
-        audioBase64: streamed.audioBase64 || undefined,
-        audioMime: streamed.audioBase64 ? "audio/wav" : undefined,
-        model,
-      };
+  // Ask for native speech only when the configured model can produce it.
+  if (audioOutputEnabled()) {
+    const streamingBody = {
+      model,
+      messages,
+      stream: true,
+      stream_options: { include_usage: true },
+      modalities: ["text", "audio"],
+      audio: { voice, format: "wav" },
+      max_tokens: 400,
+      temperature: 0.4,
+    };
+    const streamingResponse = await postOmni(streamingBody, timeout);
+    if (streamingResponse.ok) {
+      const streamed = await readSse(streamingResponse, input.requestId);
+      if (streamed.text || streamed.audioBase64) {
+        return {
+          text: streamed.text || "I reviewed the frame and measurements.",
+          audioBase64: streamed.audioBase64 || undefined,
+          audioMime: streamed.audioBase64 ? "audio/wav" : undefined,
+          model,
+        };
+      }
     }
   }
 
@@ -199,7 +212,7 @@ export async function runOmniTurn(input: OmniTurnInput, signal: AbortSignal): Pr
     max_tokens: 400,
     temperature: 0.4,
   };
-  response = await postOmni(textOnlyBody, timeout);
+  const response = await postOmni(textOnlyBody, timeout);
   const payload = (await response.json().catch(() => ({}))) as {
     error?: { message?: string };
     choices?: Array<{ message?: { content?: string | Array<{ type?: string; text?: string }> } }>;
@@ -216,6 +229,7 @@ export async function runOmniTurn(input: OmniTurnInput, signal: AbortSignal): Pr
   return {
     text: text || "I reviewed the frame and measurements.",
     model,
-    degraded: true,
+    // Degraded only means: audio was requested and the provider did not supply it.
+    degraded: audioOutputEnabled() || undefined,
   };
 }

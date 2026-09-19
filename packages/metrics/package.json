@@ -9,7 +9,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "node -e \"process.exit(0)\"",
+    "build": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {

@@ -1,0 +1,53 @@
+{
+  "expo": {
+    "name": "Align",
+    "slug": "align-htn26",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "align",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.align.htn26",
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "Align connects to your local coaching server during development.",
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        }
+      }
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Align to frame and capture your guided posture scan.",
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": false
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow Align to record a short question for your posture coach.",
+          "enableBackgroundPlayback": false,
+          "enableBackgroundRecording": false
+        }
+      ],
+      [
+        "expo-sensors",
+        {
+          "motionPermission": "Allow Align to check whether your phone is level on its stand."
+        }
+      ],
+      "expo-sqlite",
+      "expo-status-bar",
+      "expo-asset",
+      "expo-font",
+      "./plugins/with-space-safe-ios-build.cjs"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
