@@ -1,5 +1,7 @@
 # idontknowthenameyet
 
+**Build plan:** [Align implementation specification](docs/BUILD_SPEC.md) covers the Expo/iOS frontend, native pose pipeline, accuracy gates, OMNI/ElevenLabs integration, data contracts, and implementation milestones. It supersedes unsupported measurement and identity assumptions in the original concept below. See also [research and sponsor guidance](docs/research-chinese-scanners-and-omni.md).
+
 Working title. Feed **this entire file** to GPT-6 Astra / Codex as the product spec. Infer a shippable mobile/web app. Do not wait for another doc.
 
 Build a **live 3D posture scan**: phone camera, **floor marker**, user **rotates in place**. Match the **named findings and numeric specificity** of commercial Chinese 3D posture-scan mirrors (gym / rehab / wellness kiosks that do a 360° body scan). Push landmark angles, left/right deltas, and confidence as far as a single phone will go.
