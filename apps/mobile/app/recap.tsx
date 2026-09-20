@@ -57,8 +57,8 @@ export default function RecapScreen() {
   return (
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <View style={styles.successIcon}><SymbolView name="checkmark" size={31} tintColor={colors.white} weight="bold" /></View>
-      <Text accessibilityRole="header" style={styles.title}>Four views, one consistent baseline.</Text>
-      <Text style={styles.lead}>{progress.accepted} of {progress.total} views captured. This confirms capture completeness—not posture quality.</Text>
+      <Text accessibilityRole="header" style={styles.title}>Your live scan is complete.</Text>
+      <Text style={styles.lead}>{progress.accepted} milestone views retained from the continuous scan. This confirms capture coverage—not posture quality.</Text>
 
       <View style={styles.gallery}>
         {CAPTURE_VIEWS.map((view) => (

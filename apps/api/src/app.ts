@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { coachTurnMetaSchema, guidanceReportSchema, scanGuidanceMetaSchema, type ModelGuidanceDraft } from "@align/contracts";
+import { VIEWS, coachTurnMetaSchema, guidanceReportSchema, liveFinalizeMetaSchema, liveFrameMetaSchema, scanGuidanceMetaSchema, type ModelGuidanceDraft } from "@align/contracts";
 import { attachCoachVoice } from "./coachVoice.js";
 import { runGuidanceAnalysis, runGuidanceSpeech, type GuidanceModelInput } from "./guidanceModel.js";
 import { validateGuidanceDraft } from "./guidancePolicy.js";
 import { ALLOWED_AUDIO, ALLOWED_IMAGE, LIMITS } from "./limits.js";
+import { LiveSessionStore } from "./liveSession.js";
 import { runOmniTurn } from "./omni.js";
 import { resolveProviderConfig, type ProviderConfig } from "./provider.js";
 
@@ -38,6 +39,8 @@ export function createApp(dependencies: Dependencies = {}) {
   const app = new Hono();
   const activeTurns = new Map<string, AbortController>();
   const recentTurns = new Map<string, number[]>();
+  const recentFrames = new Map<string, number[]>();
+  const liveSessions = new LiveSessionStore();
   const provider = dependencies.provider ?? (() => resolveProviderConfig(process.env));
   const analyze = dependencies.analyze ?? runGuidanceAnalysis;
   const speak = dependencies.speak ?? runGuidanceSpeech;
@@ -62,6 +65,15 @@ export function createApp(dependencies: Dependencies = {}) {
     return false;
   };
 
+  const frameLimited = (key: string) => {
+    const now = Date.now();
+    const recent = (recentFrames.get(key) ?? []).filter((time) => now - time <= 60_000);
+    if (recent.length >= 120) return true;
+    recent.push(now);
+    recentFrames.set(key, recent);
+    return false;
+  };
+
   app.get("/v1/health", (c) => {
     const config = provider();
     return c.json({
@@ -73,6 +85,127 @@ export function createApp(dependencies: Dependencies = {}) {
       model: config.configured ? config.model : null,
       nativeAudioExpected: config.nativeAudioExpected,
     });
+  });
+
+  app.post("/v1/live/sessions/:scanId/frames", async (c) => {
+    const authorization = c.req.header("Authorization");
+    if (!authorized(authorization)) return c.json({ error: "unauthorized" }, 401);
+    if (frameLimited(clientKey(authorization))) return c.json({ error: "rate_limited" }, 429);
+    const scanId = decodeURIComponent(c.req.param("scanId"));
+    if (!scanId || scanId.length > 80) return c.json({ error: "invalid_scan_id" }, 400);
+    const body = await c.req.parseBody({ all: true });
+    const metaField = body.meta;
+    const image = body.image;
+    if (typeof metaField !== "string" || Buffer.byteLength(metaField) > LIMITS.metaBytes) return c.json({ error: "invalid_meta" }, 400);
+    let meta;
+    try {
+      meta = liveFrameMetaSchema.parse(JSON.parse(metaField));
+    } catch {
+      return c.json({ error: "invalid_meta" }, 400);
+    }
+    if (!(image instanceof File)) return c.json({ error: "missing_media", requestId: meta.requestId }, 400);
+    if (image.type !== "image/jpeg" || image.size > LIMITS.imageBytes) return c.json({ error: "invalid_image", requestId: meta.requestId }, 400);
+    let result;
+    try {
+      result = liveSessions.addFrame({
+        scanId,
+        timestampMs: meta.capturedAtMs,
+        imageBase64: Buffer.from(await image.arrayBuffer()).toString("base64"),
+        imageMime: image.type,
+        view: meta.view,
+        orientation: meta.orientation,
+        fingerprint: meta.fingerprint,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === "live_session_not_accepting") {
+        return c.json({ error: "live_session_closed", requestId: meta.requestId }, 409);
+      }
+      throw error;
+    }
+    return c.json({ requestId: meta.requestId, ...result }, 202);
+  });
+
+  app.delete("/v1/live/sessions/:scanId", (c) => {
+    const authorization = c.req.header("Authorization");
+    if (!authorized(authorization)) return c.json({ error: "unauthorized" }, 401);
+    const scanId = decodeURIComponent(c.req.param("scanId"));
+    if (!scanId || scanId.length > 80) return c.json({ error: "invalid_scan_id" }, 400);
+    activeTurns.get(scanId)?.abort();
+    activeTurns.delete(scanId);
+    liveSessions.close(scanId);
+    return c.body(null, 204);
+  });
+
+  app.post("/v1/live/sessions/:scanId/finalize", async (c) => {
+    const authorization = c.req.header("Authorization");
+    if (!authorized(authorization)) return c.json({ error: "unauthorized" }, 401);
+    if (limited(clientKey(authorization))) return c.json({ error: "rate_limited" }, 429);
+    const scanId = decodeURIComponent(c.req.param("scanId"));
+    if (!scanId || scanId.length > 80) return c.json({ error: "invalid_scan_id" }, 400);
+    const body = await c.req.parseBody({ all: true });
+    const metaField = body.meta;
+    const audio = body.audio;
+    if (typeof metaField !== "string" || Buffer.byteLength(metaField) > LIMITS.metaBytes) return c.json({ error: "invalid_meta" }, 400);
+    let meta;
+    try {
+      meta = liveFinalizeMetaSchema.parse(JSON.parse(metaField));
+    } catch {
+      return c.json({ error: "invalid_meta" }, 400);
+    }
+    if (!(audio instanceof File)) return c.json({ error: "missing_media", requestId: meta.requestId }, 400);
+    if ((!ALLOWED_AUDIO.has(audio.type) && !audio.type.startsWith("audio/")) || audio.size > LIMITS.audioBytes) {
+      return c.json({ error: "invalid_audio", requestId: meta.requestId }, 400);
+    }
+    const samples = liveSessions.selectLatestByView(scanId, VIEWS);
+    if (samples.length < 4) return c.json({ error: "missing_live_frames", requestId: meta.requestId }, 400);
+    if (!liveSessions.beginFinalize(scanId)) return c.json({ error: "live_session_busy", requestId: meta.requestId }, 409);
+
+    activeTurns.get(scanId)?.abort();
+    const controller = new AbortController();
+    activeTurns.set(scanId, controller);
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(LIMITS.timeoutMs)]);
+    const startedAt = Date.now();
+    const config = provider();
+    try {
+      const draft = await analyze({
+        requestId: meta.requestId,
+        scanId,
+        images: samples.map((sample) => ({ view: sample.view, base64: sample.imageBase64, mime: sample.imageMime })),
+        audioBase64: Buffer.from(await audio.arrayBuffer()).toString("base64"),
+        audioFormat: audio.type,
+        measurements: meta.measurements,
+        captureNotes: ["Continuous live camera scan; labels represent temporal scan phases.", ...(meta.captureNotes ?? [])],
+        locale: meta.locale,
+      }, config, signal);
+      const core = validateGuidanceDraft(draft);
+      const voice = await speak(narration(core), config, signal);
+      const report = guidanceReportSchema.parse({
+        requestId: meta.requestId,
+        ...core,
+        ...voice,
+        speechProvider: voice.audioBase64 && config.mode === "omni" ? "omni" : "none",
+        providerMode: config.mode,
+        model: config.model,
+        latencyMs: Date.now() - startedAt,
+        degraded: config.nativeAudioExpected && !voice.audioBase64 ? true : undefined,
+      });
+      console.info("live_guidance_report", meta.requestId, config.mode, config.model, report.latencyMs, report.speechProvider);
+      liveSessions.close(scanId);
+      return c.json(report);
+    } catch (error) {
+      const name = error instanceof Error ? error.name : "";
+      const message = error instanceof Error ? error.message : "guidance_failed";
+      if (name === "GuidanceConfigError") return c.json({ error: "guidance_not_configured", requestId: meta.requestId }, 503);
+      if (name === "AbortError" || signal.aborted) return c.json({ error: "cancelled", requestId: meta.requestId }, 409);
+      if (name === "GuidanceModelResponseError" || ["forbidden_medical_claim", "invented_numeric_finding", "unknown_evidence_source", "unknown_safety_signal"].includes(message)) {
+        return c.json({ error: "guidance_invalid", requestId: meta.requestId }, 502);
+      }
+      console.error("live_guidance_failed", meta.requestId, config.mode, name || "Error", message);
+      return c.json({ error: "guidance_failed", requestId: meta.requestId }, 502);
+    } finally {
+      liveSessions.reopen(scanId);
+      if (activeTurns.get(scanId) === controller) activeTurns.delete(scanId);
+    }
   });
 
   app.post("/v1/guidance/report", async (c) => {

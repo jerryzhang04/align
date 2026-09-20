@@ -51,7 +51,7 @@ export default function HomeScreen() {
         <View style={styles.hero}>
           <Text style={styles.eyebrow}>GUIDED POSTURE CAPTURE</Text>
           <Text accessibilityRole="header" style={styles.title}>Set the phone down. Step into frame.</Text>
-          <Text style={styles.subtitle}>Align guides the rest—four consistent views, one calm voice, and no invented measurements.</Text>
+          <Text style={styles.subtitle}>Align guides one slow live scan, samples useful views automatically, and responds with one calm voice.</Text>
         </View>
 
         <View style={styles.previewCard}>

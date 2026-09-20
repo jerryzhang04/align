@@ -1,0 +1,107 @@
+import { guidanceReportSchema, type GuidanceReport, type Measurement, type ViewId } from "@align/contracts";
+
+type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
+
+type ClientOptions = {
+  baseUrl: string;
+  token: string;
+  fetchImpl?: FetchLike;
+};
+
+type Orientation = { yaw?: number; pitch?: number; roll?: number };
+
+type UploadFrameInput = {
+  scanId: string;
+  requestId: string;
+  capturedAtMs: number;
+  view: ViewId;
+  imageUri: string;
+  orientation?: Orientation;
+  signal?: AbortSignal;
+};
+
+type FinalizeInput = {
+  scanId: string;
+  requestId: string;
+  audioUri: string;
+  measurements?: Measurement[];
+  captureNotes?: string[];
+  locale?: string;
+  signal?: AbortSignal;
+};
+
+function serverError(payload: unknown, fallback: string): Error {
+  const code = payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string"
+    ? payload.error
+    : fallback;
+  return new Error(code);
+}
+
+export function createLiveCoachClient({ baseUrl, token, fetchImpl = fetch }: ClientOptions) {
+  const root = baseUrl.replace(/\/$/, "");
+  const headers = () => token ? { Authorization: `Bearer ${token}` } : undefined;
+  const sessionUrl = (scanId: string, action: "frames" | "finalize") => `${root}/v1/live/sessions/${encodeURIComponent(scanId)}/${action}`;
+
+  return {
+    async uploadFrame(input: UploadFrameInput) {
+      const form = new FormData();
+      form.append("meta", JSON.stringify({
+        requestId: input.requestId,
+        capturedAtMs: input.capturedAtMs,
+        view: input.view,
+        ...(input.orientation ? { orientation: input.orientation } : {}),
+      }));
+      form.append("image", { uri: input.imageUri, name: `${input.requestId}.jpg`, type: "image/jpeg" } as unknown as Blob);
+      const response = await fetchImpl(sessionUrl(input.scanId, "frames"), {
+        method: "POST",
+        body: form,
+        headers: headers(),
+        signal: input.signal,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw serverError(payload, "live_frame_failed");
+      return payload as { requestId: string; accepted: boolean; replaced: boolean; frameCount: number };
+    },
+
+    async finalize(input: FinalizeInput): Promise<GuidanceReport> {
+      const form = new FormData();
+      form.append("meta", JSON.stringify({
+        requestId: input.requestId,
+        measurements: input.measurements ?? [],
+        captureNotes: input.captureNotes ?? [],
+        locale: input.locale ?? "en-CA",
+      }));
+      form.append("audio", { uri: input.audioUri, name: "goal.m4a", type: "audio/mp4" } as unknown as Blob);
+      const response = await fetchImpl(sessionUrl(input.scanId, "finalize"), {
+        method: "POST",
+        body: form,
+        headers: headers(),
+        signal: input.signal,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw serverError(payload, "live_guidance_failed");
+      return guidanceReportSchema.parse(payload);
+    },
+
+    async reset(scanId: string, signal?: AbortSignal): Promise<void> {
+      const response = await fetchImpl(`${root}/v1/live/sessions/${encodeURIComponent(scanId)}`, {
+        method: "DELETE",
+        headers: headers(),
+        signal,
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw serverError(payload, "live_reset_failed");
+      }
+    },
+  };
+}
+
+const defaultClient = createLiveCoachClient({
+  baseUrl: process.env.EXPO_PUBLIC_ALIGN_API_URL ?? "http://127.0.0.1:8788",
+  token: process.env.EXPO_PUBLIC_ALIGN_API_TOKEN ?? "",
+});
+
+export const uploadLiveFrame = defaultClient.uploadFrame;
+export const finalizeLiveSession = defaultClient.finalize;
+export const resetLiveSession = defaultClient.reset;

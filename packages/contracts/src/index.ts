@@ -100,6 +100,27 @@ export const scanGuidanceMetaSchema = z.object({
 });
 export type ScanGuidanceMeta = z.infer<typeof scanGuidanceMetaSchema>;
 
+export const liveFrameMetaSchema = z.object({
+  requestId: z.string().min(1).max(80),
+  capturedAtMs: z.number().int().nonnegative(),
+  view: z.enum(VIEWS),
+  orientation: z.object({
+    yaw: z.number().finite().optional(),
+    pitch: z.number().finite().optional(),
+    roll: z.number().finite().optional(),
+  }).optional(),
+  fingerprint: z.string().min(1).max(160).optional(),
+});
+export type LiveFrameMeta = z.infer<typeof liveFrameMetaSchema>;
+
+export const liveFinalizeMetaSchema = z.object({
+  requestId: z.string().min(1).max(80),
+  measurements: z.array(measurementSchema).max(40),
+  captureNotes: z.array(z.string().max(240)).max(12).optional(),
+  locale: z.string().min(2).max(20).default("en-CA"),
+});
+export type LiveFinalizeMeta = z.infer<typeof liveFinalizeMetaSchema>;
+
 export const guidanceReportSchema = z.object({
   requestId: z.string(),
   summary: z.string(),

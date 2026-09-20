@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -9,45 +9,82 @@ import {
   useAudioPlayer,
   useAudioRecorder,
 } from "expo-audio";
-import { router, useLocalSearchParams } from "expo-router";
+import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import type { ViewId } from "@align/contracts";
 import { PrimaryButton } from "../src/components/PrimaryButton";
 import { ProgressRail } from "../src/components/ProgressRail";
-import { CAPTURE_VIEWS, advanceCapture } from "../src/lib/captureFlow";
+import { createLiveFrameSampler } from "../src/lib/liveFrameSampler";
+import { liveScanPhase } from "../src/lib/liveScanFlow";
 import { createOperationGate } from "../src/lib/operationGate";
+import { voiceButtonAction } from "../src/lib/voiceInteraction";
 import { cacheCoachAudio } from "../src/services/audioFile";
-import { askCoach, requestGuidance } from "../src/services/coach";
+import { askCoach } from "../src/services/coach";
 import { discardCaptures, discardLocalFiles, persistCapture } from "../src/services/captures";
+import { finalizeLiveSession, resetLiveSession, uploadLiveFrame } from "../src/services/liveCoach";
 import { useScan } from "../src/state/ScanContext";
 import { colors, radius, spacing } from "../src/theme";
 import { pauseAudioSafely } from "../src/lib/audioLifecycle";
 
-const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const MAX_VOICE_RECORDING_MS = 15_000;
 
 export default function ScanScreen() {
-  const params = useLocalSearchParams<{ retake?: ViewId }>();
   const [permission] = useCameraPermissions();
   const camera = useRef<CameraView | null>(null);
+  const cameraBusy = useRef(false);
   const requestController = useRef<AbortController | null>(null);
+  const liveUploadController = useRef<AbortController | null>(null);
   const captureGate = useRef(createOperationGate()).current;
   const questionGate = useRef(createOperationGate()).current;
+  const liveSampler = useRef(createLiveFrameSampler()).current;
+  const liveStartedAt = useRef<number | null>(null);
+  const livePausedAt = useRef<number | null>(null);
+  const liveFrameCountRef = useRef(0);
+  const localViewsRef = useRef(new Set<ViewId>());
+  const uploadedViewsRef = useRef(new Set<ViewId>());
+  const voiceActivityRef = useRef(false);
   const mounted = useRef(true);
   const recorderActive = useRef(false);
+  const recordingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const coachAudioFile = useRef<string | null>(null);
   const { scanId, captures, cloudCoachEnabled, coachCaption, setCapture, setCoachCaption, setGuidanceReport, reset } = useScan();
-  const firstMissing = CAPTURE_VIEWS.find((view) => !captures[view.id])?.id ?? params.retake ?? "front";
-  const [active, setActive] = useState<ViewId>(firstMissing);
-  const [countdown, setCountdown] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [liveStarted, setLiveStarted] = useState(false);
+  const [liveComplete, setLiveComplete] = useState(false);
+  const [liveElapsedMs, setLiveElapsedMs] = useState(0);
+  const [liveFrameCount, setLiveFrameCount] = useState(0);
+  const [preparingRecording, setPreparingRecording] = useState(false);
   const [recording, setRecording] = useState(false);
   const [coachBusy, setCoachBusy] = useState(false);
   const [error, setError] = useState("");
   const [awaitingGuidance, setAwaitingGuidance] = useState(false);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const player = useAudioPlayer(null);
+  const livePhase = liveScanPhase(liveElapsedMs);
+  const active = livePhase.view;
+  voiceActivityRef.current = preparingRecording || recording || coachBusy;
 
-  const activeView = useMemo(() => CAPTURE_VIEWS.find((view) => view.id === active) ?? CAPTURE_VIEWS[0]!, [active]);
+  const takeCameraPhoto = async (quality: number) => {
+    if (!camera.current || cameraBusy.current) throw new Error("camera_busy");
+    cameraBusy.current = true;
+    try {
+      return await camera.current.takePictureAsync({ quality, shutterSound: false });
+    } finally {
+      cameraBusy.current = false;
+    }
+  };
+
+  const pauseLiveClock = () => {
+    if (liveStartedAt.current !== null && livePausedAt.current === null) livePausedAt.current = Date.now();
+  };
+
+  const resumeLiveClock = () => {
+    if (liveStartedAt.current !== null && livePausedAt.current !== null) {
+      liveStartedAt.current += Date.now() - livePausedAt.current;
+    }
+    livePausedAt.current = null;
+  };
 
   useEffect(() => {
     mounted.current = true;
@@ -55,59 +92,115 @@ export default function ScanScreen() {
       mounted.current = false;
       captureGate.cancel();
       questionGate.cancel();
+      liveSampler.stop();
       requestController.current?.abort();
+      liveUploadController.current?.abort();
+      if (recordingTimer.current) clearTimeout(recordingTimer.current);
       recorderActive.current = false;
       void setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => undefined);
       void discardLocalFiles(coachAudioFile.current);
     };
-  }, [captureGate, questionGate]);
+  }, [captureGate, liveSampler, questionGate]);
 
-  const captureView = async () => {
-    if (!camera.current || busy) return;
-    const operation = captureGate.begin();
-    let temporaryPhoto: string | undefined;
-    let stagedPhoto: string | undefined;
-    setBusy(true);
-    setError("");
-    try {
-      for (let tick = 3; tick >= 1; tick -= 1) {
-        setCountdown(tick);
-        await wait(700);
-        if (!mounted.current || !captureGate.isActive(operation)) return;
-      }
-      setCountdown(0);
-      const photo = await camera.current.takePictureAsync({ quality: 0.72, shutterSound: false });
-      temporaryPhoto = photo.uri;
-      if (!mounted.current || !captureGate.isActive(operation)) return;
-      stagedPhoto = await persistCapture(scanId, active, photo.uri);
-      if (!mounted.current || !captureGate.isActive(operation)) {
-        await discardLocalFiles(stagedPhoto);
-        return;
-      }
-      setCapture(active, stagedPhoto);
-      const next = advanceCapture(active);
-      if (next === "complete") {
+  useEffect(() => {
+    if (!liveStarted || liveComplete) return;
+    let cancelled = false;
+
+    const sample = async () => {
+      const startedAt = liveStartedAt.current;
+      if (startedAt === null || cancelled) return;
+      const elapsedMs = (livePausedAt.current ?? Date.now()) - startedAt;
+      const phase = liveScanPhase(elapsedMs);
+      if (mounted.current) setLiveElapsedMs(elapsedMs);
+      const ready = localViewsRef.current.size === 4 && (!cloudCoachEnabled || uploadedViewsRef.current.size === 4);
+      if (phase.complete && ready && !liveSampler.isInFlight() && !cameraBusy.current) {
+        liveSampler.stop();
+        setLiveStarted(false);
+        setLiveComplete(true);
         if (cloudCoachEnabled) setAwaitingGuidance(true);
         else router.replace("/recap");
-      } else {
-        setActive(next);
+        return;
       }
-    } catch {
-      if (mounted.current && captureGate.isActive(operation)) {
-        setError("That view did not save. Keep the phone still and try again.");
+      if (!camera.current || cameraBusy.current || voiceActivityRef.current || !liveSampler.tryStart(Date.now())) return;
+
+      const operation = captureGate.begin();
+      let temporaryPhoto: string | undefined;
+      let stagedPhoto: string | undefined;
+      let stagedRegistered = false;
+      let completed = false;
+      let uploadController: AbortController | null = null;
+      setBusy(true);
+      try {
+        const photo = await takeCameraPhoto(0.5);
+        const capturedAtMs = Date.now();
+        temporaryPhoto = photo.uri;
+        if (cancelled || !mounted.current || !captureGate.isActive(operation)) return;
+        stagedPhoto = await persistCapture(scanId, phase.view, photo.uri);
+        if (cancelled || !mounted.current || !captureGate.isActive(operation)) return;
+        setCapture(phase.view, stagedPhoto);
+        stagedRegistered = true;
+        localViewsRef.current.add(phase.view);
+        if (cloudCoachEnabled) {
+          uploadController = new AbortController();
+          liveUploadController.current = uploadController;
+          const result = await uploadLiveFrame({
+            scanId,
+            requestId: `frame-${capturedAtMs}`,
+            capturedAtMs,
+            view: phase.view,
+            imageUri: photo.uri,
+            signal: uploadController.signal,
+          });
+          uploadedViewsRef.current.add(phase.view);
+          liveFrameCountRef.current = result.frameCount;
+          if (mounted.current) setLiveFrameCount(result.frameCount);
+        }
+        if (mounted.current) setError("");
+        completed = true;
+      } catch {
+        if (mounted.current && captureGate.isActive(operation)) {
+          setError("A live frame was missed. Keep rotating slowly while Align retries.");
+        }
+      } finally {
+        if (liveUploadController.current === uploadController) liveUploadController.current = null;
+        if (completed) liveSampler.markCaptureComplete();
+        else liveSampler.markCaptureFailure();
+        if (stagedPhoto && !stagedRegistered) await discardLocalFiles(stagedPhoto);
+        await discardLocalFiles(temporaryPhoto);
+        if (mounted.current) setBusy(false);
       }
-    } finally {
-      await discardLocalFiles(temporaryPhoto);
-      if (mounted.current) {
-        setCountdown(null);
-        setBusy(false);
-      }
-    }
+    };
+
+    void sample();
+    const timer = setInterval(() => void sample(), 150);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [captureGate, cloudCoachEnabled, liveComplete, liveSampler, liveStarted, scanId]);
+
+  const startLiveScan = () => {
+    if (!cameraReady || !camera.current || cameraBusy.current || liveStarted) return;
+    captureGate.cancel();
+    liveSampler.reset();
+    liveStartedAt.current = Date.now();
+    livePausedAt.current = null;
+    liveFrameCountRef.current = 0;
+    localViewsRef.current = new Set();
+    uploadedViewsRef.current = new Set();
+    setLiveElapsedMs(0);
+    setLiveFrameCount(0);
+    setLiveComplete(false);
+    setAwaitingGuidance(false);
+    setError("");
+    setLiveStarted(true);
   };
 
   const startQuestion = async () => {
-    if (!cloudCoachEnabled || coachBusy) return;
+    if (!cloudCoachEnabled || coachBusy || preparingRecording || recording) return;
     const operation = questionGate.begin();
+    if (liveStarted) pauseLiveClock();
+    setPreparingRecording(true);
     try {
       setError("");
       pauseAudioSafely(player);
@@ -128,9 +221,13 @@ export default function ScanScreen() {
         await discardLocalFiles(recorder.uri);
         return;
       }
-      recorder.record({ forDuration: 15 });
+      recorder.record();
       recorderActive.current = true;
       setRecording(true);
+      recordingTimer.current = setTimeout(() => {
+        recordingTimer.current = null;
+        void finishQuestion();
+      }, MAX_VOICE_RECORDING_MS);
     } catch {
       recorderActive.current = false;
       await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => undefined);
@@ -138,10 +235,15 @@ export default function ScanScreen() {
       if (mounted.current && questionGate.isActive(operation)) {
         setError("The microphone could not start. Check iOS Settings and try again.");
       }
+    } finally {
+      if (!recorderActive.current) resumeLiveClock();
+      if (mounted.current) setPreparingRecording(false);
     }
   };
 
   const finishQuestion = async () => {
+    if (recordingTimer.current) clearTimeout(recordingTimer.current);
+    recordingTimer.current = null;
     questionGate.cancel();
     if (!recorderActive.current || coachBusy) return;
     recorderActive.current = false;
@@ -160,11 +262,11 @@ export default function ScanScreen() {
       let responseAudio: string | undefined;
       let responseMime: string | undefined;
       if (awaitingGuidance) {
-        const report = await requestGuidance({
+        const report = await finalizeLiveSession({
           requestId: `report-${Date.now()}`,
           scanId,
-          captures,
           audioUri,
+          captureNotes: ["User completed a guided continuous rotation."],
           signal: controller.signal,
         });
         if (!mounted.current) return;
@@ -173,8 +275,7 @@ export default function ScanScreen() {
         responseAudio = report.audioBase64;
         responseMime = report.audioMime;
       } else {
-        if (!camera.current) throw new Error("missing_camera");
-        const photo = await camera.current.takePictureAsync({ quality: 0.5, shutterSound: false });
+        const photo = await takeCameraPhoto(0.5);
         frameUri = photo.uri;
         const response = await askCoach({
           requestId: `turn-${Date.now()}`,
@@ -203,22 +304,37 @@ export default function ScanScreen() {
         setError("The coach could not answer. Your scan is still safe—check the server and try again.");
       }
     } finally {
+      resumeLiveClock();
       await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => undefined);
       await discardLocalFiles(audioUri, frameUri);
       if (mounted.current) setCoachBusy(false);
     }
   };
 
+  const handleVoicePress = () => {
+    if (!liveStarted && !liveComplete) return;
+    const action = voiceButtonAction({ preparing: preparingRecording, recording, busy: coachBusy });
+    if (action === "start") void startQuestion();
+    if (action === "finish") void finishQuestion();
+  };
+
   const stopScan = async () => {
     captureGate.cancel();
     questionGate.cancel();
+    liveUploadController.current?.abort();
+    liveSampler.stop();
+    livePausedAt.current = null;
+    setLiveStarted(false);
     requestController.current?.abort();
+    if (recordingTimer.current) clearTimeout(recordingTimer.current);
+    recordingTimer.current = null;
     if (recorderActive.current) {
       recorderActive.current = false;
       await recorder.stop().catch(() => undefined);
     }
     pauseAudioSafely(player);
     await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => undefined);
+    await resetLiveSession(scanId).catch(() => undefined);
     await discardLocalFiles(recorder.uri, coachAudioFile.current);
     await discardCaptures(captures);
     reset();
@@ -236,13 +352,26 @@ export default function ScanScreen() {
     );
   };
 
+  const skipGuidance = async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2_500);
+    try {
+      await resetLiveSession(scanId, controller.signal);
+    } catch {
+      // The API also expires abandoned live sessions; skipping should never trap the user here.
+    } finally {
+      clearTimeout(timeout);
+      if (mounted.current) router.replace("/recap");
+    }
+  };
+
   if (!permission?.granted) {
     return <SafeAreaView style={styles.blocked}><Text style={styles.blockedTitle}>Camera access was removed.</Text><PrimaryButton label="Return to setup" onPress={() => router.replace("/setup")} /></SafeAreaView>;
   }
 
   return (
     <View style={styles.page}>
-      <CameraView ref={camera} style={StyleSheet.absoluteFill} facing="back" mode="picture" animateShutter={false} />
+      <CameraView ref={camera} style={StyleSheet.absoluteFill} facing="back" mode="picture" animateShutter={false} onCameraReady={() => setCameraReady(true)} />
       <View pointerEvents="none" style={styles.scrimTop} />
       <View pointerEvents="none" style={styles.scrimBottom} />
 
@@ -255,8 +384,8 @@ export default function ScanScreen() {
         <ProgressRail active={active} captures={captures} />
 
         <View style={styles.instructionCard}>
-          <Text style={styles.viewLabel}>{awaitingGuidance ? "FINAL STEP" : `${activeView.label.toUpperCase()} VIEW`}</Text>
-          <Text style={styles.instruction}>{awaitingGuidance ? "Hold the microphone and describe what feels uncomfortable or what you want help with." : activeView.instruction}</Text>
+          <Text style={styles.viewLabel}>{awaitingGuidance ? "FINAL STEP" : liveStarted ? `${livePhase.view.toUpperCase()} PHASE` : "CONTINUOUS SCAN"}</Text>
+          <Text style={styles.instruction}>{awaitingGuidance ? "Tap the microphone, describe what feels uncomfortable or what you want help with, then tap again to send." : liveStarted ? livePhase.instruction : "Stand fully in frame, then start one slow turn. Align will sample the live feed automatically."}</Text>
         </View>
 
         <View pointerEvents="none" style={styles.frameGuide}>
@@ -265,9 +394,10 @@ export default function ScanScreen() {
           <View style={styles.floorMark}><View style={styles.floorLineA} /><View style={styles.floorLineB} /></View>
         </View>
 
-        {countdown !== null ? (
+        {liveStarted ? (
           <View pointerEvents="none" style={styles.countdownBubble}>
-            <Text style={styles.countdownText}>{countdown === 0 ? "HOLD" : countdown}</Text>
+            <Text style={styles.countdownText}>{Math.round(livePhase.progress * 100)}%</Text>
+            <Text style={styles.liveSampleText}>{liveFrameCount} frames</Text>
           </View>
         ) : null}
 
@@ -277,27 +407,26 @@ export default function ScanScreen() {
           <View style={styles.actionRow}>
             <View style={styles.coachAction}>
               <PrimaryButton
-                label={recording ? "Listening… release" : coachBusy ? "Reviewing four views…" : awaitingGuidance ? "Hold to describe your goal" : cloudCoachEnabled ? "Hold to ask" : "Coach off"}
+                label={recording ? "Tap to send" : preparingRecording ? "Starting microphone…" : coachBusy ? "Coach is responding…" : awaitingGuidance ? "Tap to describe your goal" : cloudCoachEnabled ? "Tap to ask coach" : "Coach off"}
                 variant="secondary"
-                disabled={!cloudCoachEnabled || coachBusy}
-                onPressIn={startQuestion}
-                onPressOut={finishQuestion}
-                icon={coachBusy ? <ActivityIndicator color={colors.tealDark} /> : <SymbolView name={recording ? "waveform" : "mic.fill"} size={19} tintColor={recording ? colors.coral : colors.tealDark} />}
+                disabled={!cloudCoachEnabled || coachBusy || preparingRecording || (!liveStarted && !liveComplete)}
+                onPress={handleVoicePress}
+                icon={coachBusy || preparingRecording ? <ActivityIndicator color={colors.tealDark} /> : <SymbolView name={recording ? "waveform" : "mic.fill"} size={19} tintColor={recording ? colors.coral : colors.tealDark} />}
               />
             </View>
             {awaitingGuidance ? (
-              <PrimaryButton label="Skip guidance" variant="secondary" disabled={recording || coachBusy} onPress={() => router.replace("/recap")} style={styles.captureAction} />
+              <PrimaryButton label="Skip guidance" variant="secondary" disabled={preparingRecording || recording || coachBusy} onPress={() => void skipGuidance()} style={styles.captureAction} />
             ) : (
               <PrimaryButton
-                label={busy ? "Capturing…" : `Capture ${activeView.label}`}
-                disabled={busy || recording || coachBusy}
-                onPress={captureView}
+                label={liveStarted ? `${busy ? "Sampling" : "Scanning"} ${Math.round(livePhase.progress * 100)}%` : cameraReady ? "Start live scan" : "Starting camera…"}
+                disabled={!cameraReady || liveStarted || busy || preparingRecording || recording || coachBusy}
+                onPress={startLiveScan}
                 style={styles.captureAction}
-                icon={<SymbolView name="camera.fill" size={19} tintColor={colors.white} />}
+                icon={liveStarted ? <ActivityIndicator color={colors.white} /> : <SymbolView name="video.fill" size={19} tintColor={colors.white} />}
               />
             )}
           </View>
-          <Text style={styles.hint}>{awaitingGuidance ? "Your four captured views and this recording are reviewed together." : cloudCoachEnabled ? "Hold Ask coach, speak, then release. The current frame goes with your question." : "Local-only mode: no frame or audio leaves this iPhone."}</Text>
+          <Text style={styles.hint}>{awaitingGuidance ? "Tap once to record your goal, then tap again to send it with the live scan." : liveStarted ? "Rotate slowly. You can tap the coach at any time; live sampling pauses while you speak." : cloudCoachEnabled ? "One live scan replaces four separate photo buttons." : "Local-only mode: frames stay on this iPhone."}</Text>
         </View>
       </SafeAreaView>
     </View>
@@ -331,6 +460,7 @@ const styles = StyleSheet.create({
   floorLineB: { position: "absolute", width: 46, height: 2, top: 9, backgroundColor: "rgba(255,255,255,0.72)", transform: [{ rotate: "-12deg" }] },
   countdownBubble: { position: "absolute", top: "45%", alignSelf: "center", width: 108, height: 108, borderRadius: 54, backgroundColor: "rgba(12,24,20,0.86)", borderWidth: 2, borderColor: "rgba(255,255,255,0.75)", alignItems: "center", justifyContent: "center" },
   countdownText: { color: colors.white, fontSize: 42, fontWeight: "800", letterSpacing: -1 },
+  liveSampleText: { color: "#C7CFCC", fontSize: 11, fontWeight: "700" },
   bottomPanel: { marginTop: "auto", paddingBottom: spacing.sm, gap: spacing.sm },
   caption: { borderRadius: radius.md, backgroundColor: "rgba(247,250,247,0.94)", padding: spacing.md, gap: 4 },
   captionLabel: { color: colors.tealDark, fontSize: 10, fontWeight: "900", letterSpacing: 1.2 },

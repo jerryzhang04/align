@@ -46,7 +46,7 @@ export default function SetupScreen() {
       <View style={styles.permissionPage}>
         <View style={styles.permissionIcon}><SymbolView name="camera.fill" size={32} tintColor={colors.tealDark} /></View>
         <Text style={styles.permissionTitle}>Align needs the camera to frame your scan.</Text>
-        <Text style={styles.permissionBody}>Nothing is uploaded until you hold Ask coach. You can change camera access in iOS Settings.</Text>
+        <Text style={styles.permissionBody}>In voice-coach mode, sampled live frames upload only after you start the scan. You can change camera access in iOS Settings.</Text>
         <PrimaryButton label="Enable camera" onPress={prepare} />
         {cameraPermission && !cameraPermission.canAskAgain ? <PrimaryButton label="Open iOS Settings" variant="secondary" onPress={() => Linking.openSettings()} /> : null}
       </View>

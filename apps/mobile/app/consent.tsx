@@ -25,12 +25,12 @@ export default function ConsentScreen() {
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <View style={styles.heroIcon}><SymbolView name="hand.raised.fill" size={32} tintColor={colors.tealDark} /></View>
       <Text accessibilityRole="header" style={styles.title}>You decide what leaves the phone.</Text>
-      <Text style={styles.lead}>Capture works locally. The coach only receives media when you deliberately hold the talk button.</Text>
+      <Text style={styles.lead}>Capture can stay local. If you continue with the voice coach, sampled frames upload during the live scan so OMNI can review the rotation and answer you.</Text>
 
       <View style={styles.card}>
-        <PrivacyRow symbol="iphone" title="Camera capture" body="Four still views are saved on this iPhone when you choose Save session." />
+        <PrivacyRow symbol="iphone" title="Live camera scan" body="Align samples a slow live rotation. Voice-coach mode uploads those samples to the private coaching server; local mode keeps them on this iPhone." />
         <View style={styles.rule} />
-        <PrivacyRow symbol="waveform" title="Ask the coach" body="A selected frame and short recording go to OMNI. OMNI answers in text, and speaks it when it returns audio." />
+        <PrivacyRow symbol="waveform" title="Ask the coach" body="Your short recording and sampled scan frames go to OMNI. OMNI answers in text and native speech." />
         <View style={styles.rule} />
         <PrivacyRow symbol="lock.shield" title="No hidden scoring" body="The prototype does not invent posture angles while native pose measurement is still being connected." />
       </View>
@@ -41,7 +41,7 @@ export default function ConsentScreen() {
       </View>
 
       <View style={styles.actions}>
-        <PrimaryButton label="Continue with voice coach" onPress={() => continueWith(true)} />
+        <PrimaryButton label="Share live samples with voice coach" onPress={() => continueWith(true)} />
         <PrimaryButton label="Use local capture only" variant="secondary" onPress={() => continueWith(false)} />
       </View>
     </ScrollView>

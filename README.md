@@ -1,6 +1,6 @@
 # Align
 
-Align is an iPhone-first guided posture capture prototype for Hack the North 2026. The native Expo app levels the camera, guides a front/right/back/left capture, records a spoken question, and sends the current frame plus audio to OMNI. OMNI owns understanding, response text, and speech. Captions and local capture continue when cloud coaching is unavailable.
+Align is an iPhone-first guided posture capture prototype for Hack the North 2026. The native Expo app guides one slow continuous camera scan, samples useful frames automatically, records spoken questions, and sends sampled visual context plus audio to OMNI. OMNI owns understanding, response text, and speech. Captions and local capture continue when cloud coaching is unavailable.
 
 The app is honest by design: it does not display posture angles or scores until a verified native pose pipeline supplies those measurements.
 
@@ -58,12 +58,12 @@ Set credentials only in the ignored root `.env`. Never put provider credentials 
 ## What is implemented
 
 - Expo Router native navigation for home, consent, setup, live scan, and recap.
-- Rear-camera four-view capture with a three-second hands-free countdown.
+- Rear-camera continuous scan with bounded 750 ms frame sampling and four automatically retained milestone views.
 - Device-motion horizon guide for a level phone on a stand.
-- Push-to-talk recording with the current camera frame attached.
+- Tap-to-record voice coaching with the current camera frame attached.
 - OMNI multimodal backend turn with abort, payload bounds, rate limits, and safe error mapping.
 - OMNI-native speech for OMNI's response, with a caption fallback when the model returns text only.
-- Four-view plus spoken-goal analysis with structured observations, conservative actions, safety escalation, and server-resolved evidence citations.
+- Continuous sampled-view plus spoken-goal analysis with structured observations, conservative actions, safety escalation, and server-resolved evidence citations.
 - A versioned evidence catalog backed by WHO, CCOHS, NICE, NHS, and peer-reviewed systematic-review sources.
 - One-command LAN launchers with an ephemeral bearer token for physical-device testing.
 - Disposable image staging until Save, followed by persistent local images and SQLite session summaries.
