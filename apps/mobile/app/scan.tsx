@@ -21,6 +21,7 @@ import { askCoach, requestGuidance } from "../src/services/coach";
 import { discardCaptures, discardLocalFiles, persistCapture } from "../src/services/captures";
 import { useScan } from "../src/state/ScanContext";
 import { colors, radius, spacing } from "../src/theme";
+import { pauseAudioSafely } from "../src/lib/audioLifecycle";
 
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -55,17 +56,11 @@ export default function ScanScreen() {
       captureGate.cancel();
       questionGate.cancel();
       requestController.current?.abort();
-      player.pause();
-      if (recorderActive.current) {
-        recorderActive.current = false;
-        void recorder.stop().catch(() => undefined).finally(() => {
-          void discardLocalFiles(recorder.uri);
-          void setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
-        });
-      }
+      recorderActive.current = false;
+      void setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => undefined);
       void discardLocalFiles(coachAudioFile.current);
     };
-  }, [captureGate, player, questionGate, recorder]);
+  }, [captureGate, questionGate]);
 
   const captureView = async () => {
     if (!camera.current || busy) return;
@@ -115,7 +110,7 @@ export default function ScanScreen() {
     const operation = questionGate.begin();
     try {
       setError("");
-      player.pause();
+      pauseAudioSafely(player);
       const microphone = await requestRecordingPermissionsAsync();
       if (!mounted.current || !questionGate.isActive(operation)) return;
       if (!microphone.granted) {
@@ -222,7 +217,7 @@ export default function ScanScreen() {
       recorderActive.current = false;
       await recorder.stop().catch(() => undefined);
     }
-    player.pause();
+    pauseAudioSafely(player);
     await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => undefined);
     await discardLocalFiles(recorder.uri, coachAudioFile.current);
     await discardCaptures(captures);

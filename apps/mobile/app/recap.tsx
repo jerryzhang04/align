@@ -31,7 +31,6 @@ export default function RecapScreen() {
     player.replace(file);
     player.play();
     return () => {
-      player.pause();
       void discardLocalFiles(reportAudioFile.current);
     };
   }, [guidanceReport, player]);
