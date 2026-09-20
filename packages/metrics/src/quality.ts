@@ -59,6 +59,52 @@ export function assessFrame(frame: PoseFrame, view: ViewId): QualityResult {
   return { ok: issues.length === 0, issues };
 }
 
+function visiblePoint(frame: PoseFrame, index: number, threshold = 0.4) {
+  return visible(frame, index, threshold) ? frame.landmarks[index] : null;
+}
+
+function bodySpan(frame: PoseFrame): { height: number; midX: number } | null {
+  const head = visiblePoint(frame, LANDMARK.nose) ?? visiblePoint(frame, LANDMARK.leftEar) ?? visiblePoint(frame, LANDMARK.rightEar);
+  const leftAnkle = visiblePoint(frame, LANDMARK.leftAnkle);
+  const rightAnkle = visiblePoint(frame, LANDMARK.rightAnkle);
+  const ankle = leftAnkle && rightAnkle
+    ? (leftAnkle.y >= rightAnkle.y ? leftAnkle : rightAnkle)
+    : leftAnkle ?? rightAnkle;
+  const leftShoulder = visiblePoint(frame, LANDMARK.leftShoulder, 0.45);
+  const rightShoulder = visiblePoint(frame, LANDMARK.rightShoulder, 0.45);
+  const leftHip = visiblePoint(frame, LANDMARK.leftHip, 0.45);
+  const rightHip = visiblePoint(frame, LANDMARK.rightHip, 0.45);
+  if (!head || !ankle) return null;
+  const xs = [head.x, ankle.x, leftShoulder?.x, rightShoulder?.x, leftHip?.x, rightHip?.x].filter((value): value is number => typeof value === "number");
+  const midX = xs.reduce((sum, value) => sum + value, 0) / xs.length;
+  return { height: ankle.y - head.y, midX };
+}
+
+/**
+ * Face ID analog: the person must occupy the standing guide (full height, centered,
+ * correct facing) before a hold can fill. Pattern matches open-source selfie SDKs
+ * that keep progress at 0 until the face is inside the oval, then reset on leave.
+ */
+export function fitBodyGuide(frame: PoseFrame, view: ViewId): QualityResult {
+  const quality = assessFrame(frame, view);
+  const issues = [...quality.issues];
+  const span = bodySpan(frame);
+  if (!span) {
+    issues.push({ code: "no_pose", message: "Step into the outline so your whole body is visible." });
+  } else {
+    if (span.height < 0.55) {
+      issues.push({ code: "too_far", message: "Step closer until your head and feet fill the outline." });
+    } else if (span.height > 0.92) {
+      issues.push({ code: "too_close", message: "Step back so hair to shoes fits inside the outline." });
+    }
+    if (Math.abs(span.midX - 0.5) > 0.16) {
+      issues.push({ code: "off_center", message: "Shift left or right until you are centered in the outline." });
+    }
+  }
+  const unique = issues.filter((issue, index) => issues.findIndex((item) => item.code === issue.code) === index);
+  return { ok: unique.length === 0, issues: unique };
+}
+
 export function motionScore(previous: PoseFrame | null, current: PoseFrame): number {
   if (!previous || previous.landmarks.length < 33 || current.landmarks.length < 33) return 1;
   const keys = [LANDMARK.leftShoulder, LANDMARK.rightShoulder, LANDMARK.leftHip, LANDMARK.rightHip];

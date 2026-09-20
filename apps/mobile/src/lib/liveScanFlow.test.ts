@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { holdFill, holdReadyToCapture, VIEW_HOLD_MS } from "./liveScanFlow";
+import { holdReadyToCapture, tickHoldFill } from "./liveScanFlow";
 
 describe("hold-to-capture scan", () => {
-  it("fills the current outline until a photo can be taken", () => {
-    expect(holdFill(0)).toBe(0);
-    expect(holdReadyToCapture(VIEW_HOLD_MS - 10, false)).toBe(false);
-    expect(holdReadyToCapture(VIEW_HOLD_MS, false)).toBe(true);
+  it("does not capture until the outline is full while the stance is valid", () => {
+    expect(tickHoldFill(0, 400, false)).toBe(0);
+    expect(holdReadyToCapture(0.4, false, true)).toBe(false);
+    expect(holdReadyToCapture(1, false, true)).toBe(true);
   });
 });

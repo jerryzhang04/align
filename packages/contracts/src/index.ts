@@ -141,6 +141,44 @@ export const poseMeasureResponseSchema = z.object({
 });
 export type PoseMeasureResponse = z.infer<typeof poseMeasureResponseSchema>;
 
+export const posePreviewMetaSchema = z.object({
+  requestId: z.string().min(1).max(80),
+  scanId: z.string().min(1).max(80),
+  view: z.enum(VIEWS),
+});
+export type PosePreviewMeta = z.infer<typeof posePreviewMetaSchema>;
+
+export const posePreviewResponseSchema = z.object({
+  requestId: z.string(),
+  aligned: z.boolean(),
+  still: z.boolean(),
+  pose: z.boolean(),
+  issues: z.array(z.object({
+    code: z.string(),
+    message: z.string(),
+  })).max(8),
+});
+export type PosePreviewResponse = z.infer<typeof posePreviewResponseSchema>;
+
+export const practiceAreaScoreSchema = z.object({
+  id: z.string().min(1).max(80),
+  label: z.string().min(1).max(80),
+  score: z.number().int().min(0).max(100),
+  view: z.enum(VIEWS),
+  measurementId: z.string().min(1).max(80),
+  measuredValue: z.number(),
+  unit: z.enum(["deg", "ratio", "seconds"]),
+  improve: z.string().min(1).max(400),
+  whyCommon: z.string().min(1).max(500),
+});
+
+export const practiceProfileSchema = z.object({
+  overall: z.number().int().min(0).max(100),
+  areas: z.array(practiceAreaScoreSchema).max(8),
+  limitations: z.array(z.string()).max(6),
+});
+export type PracticeProfile = z.infer<typeof practiceProfileSchema>;
+
 export const guidanceReportSchema = z.object({
   requestId: z.string(),
   summary: z.string(),
@@ -158,6 +196,7 @@ export const guidanceReportSchema = z.object({
     source: poseSourceSchema,
     viewsWithPose: z.array(z.enum(VIEWS)),
   }).default({ source: "none", viewsWithPose: [] }),
+  practiceScores: practiceProfileSchema.nullable().default(null),
   audioBase64: z.string().optional(),
   audioMime: z.string().optional(),
   speechProvider: z.enum(["omni", "none"]),

@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { VIEWS, coachTurnMetaSchema, guidanceReportSchema, liveFinalizeMetaSchema, liveFrameMetaSchema, poseMeasureMetaSchema, scanGuidanceMetaSchema, type ModelGuidanceDraft, type ViewId } from "@align/contracts";
+import { VIEWS, coachTurnMetaSchema, guidanceReportSchema, liveFinalizeMetaSchema, liveFrameMetaSchema, poseMeasureMetaSchema, posePreviewMetaSchema, scanGuidanceMetaSchema, type ModelGuidanceDraft, type ViewId } from "@align/contracts";
+import { practiceProfile, practiceScoreInts, type PoseFrame } from "@align/metrics";
 import { attachCoachVoice } from "./coachVoice.js";
 import { runGuidanceAnalysis, runGuidanceSpeech, type GuidanceModelInput } from "./guidanceModel.js";
 import { validateGuidanceDraft } from "./guidancePolicy.js";
@@ -10,6 +11,7 @@ import { LiveSessionStore } from "./liveSession.js";
 import { localCoachText, localWellnessCore } from "./localGuidance.js";
 import { measurePoseImages, type PoseImage, type ScanPoseResult } from "./measureScan.js";
 import { runOmniTurn } from "./omni.js";
+import { previewStanceFromJpeg, type StancePreview } from "./posePreview.js";
 import { resolveProviderConfig, type ProviderConfig } from "./provider.js";
 
 type Dependencies = {
@@ -17,6 +19,7 @@ type Dependencies = {
   analyze?: (input: GuidanceModelInput, config: ProviderConfig, signal: AbortSignal) => Promise<ModelGuidanceDraft>;
   speak?: (narration: string, config: ProviderConfig, signal: AbortSignal) => Promise<{ audioBase64?: string; audioMime?: string }>;
   measureScan?: (images: PoseImage[]) => Promise<ScanPoseResult>;
+  previewStance?: (bytes: Uint8Array, view: ViewId, previous: PoseFrame | null) => Promise<StancePreview>;
 };
 
 function livePoseImages(store: LiveSessionStore, scanId: string): PoseImage[] {
@@ -55,11 +58,13 @@ function assembleGuidanceReport(input: {
   startedAt: number;
   degraded?: boolean;
 }) {
+  const scores = practiceProfile(input.pose.measurements);
   return guidanceReportSchema.parse({
     requestId: input.requestId,
     ...input.core,
     measurements: input.pose.measurements,
     pose: { source: input.pose.source, viewsWithPose: input.pose.viewsWithPose },
+    practiceScores: scores.areas.length ? scores : null,
     ...input.voice,
     speechProvider: input.voice.audioBase64 && input.config.mode === "omni" ? "omni" : "none",
     providerMode: input.config.mode,
@@ -79,6 +84,12 @@ export function createApp(dependencies: Dependencies = {}) {
   const analyze = dependencies.analyze ?? runGuidanceAnalysis;
   const speak = dependencies.speak ?? runGuidanceSpeech;
   const measureScan = dependencies.measureScan ?? measurePoseImages;
+  const previewFrames = new Map<string, PoseFrame>();
+  const previewStance = dependencies.previewStance ?? (async (bytes: Uint8Array, view: ViewId, previous: PoseFrame | null) => {
+    const { estimatePoseFromJpeg } = await import("./poseEstimate.js");
+    return previewStanceFromJpeg(bytes, view, previous, estimatePoseFromJpeg);
+  });
+  const recentPreviews = new Map<string, number[]>();
 
   async function produceGuidance(input: {
     requestId: string;
@@ -94,6 +105,7 @@ export function createApp(dependencies: Dependencies = {}) {
     startedAt: number;
   }) {
     try {
+      const scores = practiceProfile(input.pose.measurements);
       const draft = await analyze({
         requestId: input.requestId,
         scanId: input.scanId,
@@ -101,10 +113,11 @@ export function createApp(dependencies: Dependencies = {}) {
         audioBase64: input.audioBase64,
         audioFormat: input.audioFormat,
         measurements: input.pose.measurements,
+        practiceScores: scores.areas.length ? scores : null,
         captureNotes: input.captureNotes,
         locale: input.locale,
       }, input.config, input.signal);
-      const core = validateGuidanceDraft(draft, input.pose.measurements);
+      const core = validateGuidanceDraft(draft, input.pose.measurements, practiceScoreInts(scores));
       const voice = await speak(narration(core), input.config, input.signal).catch((error) => {
         if (input.signal.aborted) throw error;
         console.warn("guidance_speech_unavailable", input.requestId);
@@ -159,6 +172,15 @@ export function createApp(dependencies: Dependencies = {}) {
     if (recent.length >= 120) return true;
     recent.push(now);
     recentFrames.set(key, recent);
+    return false;
+  };
+
+  const previewLimited = (key: string) => {
+    const now = Date.now();
+    const recent = (recentPreviews.get(key) ?? []).filter((time) => now - time <= 60_000);
+    if (recent.length >= 180) return true;
+    recent.push(now);
+    recentPreviews.set(key, recent);
     return false;
   };
 
@@ -221,6 +243,7 @@ export function createApp(dependencies: Dependencies = {}) {
     activeTurns.get(scanId)?.abort();
     activeTurns.delete(scanId);
     liveSessions.close(scanId);
+    previewFrames.delete(scanId);
     return c.body(null, 204);
   });
 
@@ -412,6 +435,42 @@ export function createApp(dependencies: Dependencies = {}) {
     }
   });
 
+  app.post("/v1/pose/preview", async (c) => {
+    const authorization = c.req.header("Authorization");
+    if (!authorized(authorization)) return c.json({ error: "unauthorized" }, 401);
+    if (previewLimited(clientKey(authorization))) return c.json({ error: "rate_limited" }, 429);
+    const body = await c.req.parseBody({ all: true });
+    const metaField = body.meta;
+    const image = body.image;
+    if (typeof metaField !== "string" || Buffer.byteLength(metaField) > LIMITS.metaBytes) return c.json({ error: "invalid_meta" }, 400);
+    let meta;
+    try {
+      meta = posePreviewMetaSchema.parse(JSON.parse(metaField));
+    } catch {
+      return c.json({ error: "invalid_meta" }, 400);
+    }
+    if (!(image instanceof File)) return c.json({ error: "missing_media", requestId: meta.requestId }, 400);
+    if (!ALLOWED_IMAGE.has(image.type) || image.size > LIMITS.imageBytes) {
+      return c.json({ error: "invalid_image", requestId: meta.requestId }, 400);
+    }
+    try {
+      const previous = previewFrames.get(meta.scanId) ?? null;
+      const result = await previewStance(Buffer.from(await image.arrayBuffer()), meta.view, previous);
+      if (result.frame) previewFrames.set(meta.scanId, result.frame);
+      return c.json({
+        requestId: meta.requestId,
+        aligned: result.aligned,
+        still: result.still,
+        pose: result.pose,
+        issues: result.issues,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "pose_failed";
+      console.error("pose_preview_failed", meta.requestId, message);
+      return c.json({ error: "pose_failed", requestId: meta.requestId }, 502);
+    }
+  });
+
   app.post("/v1/coach/turn", async (c) => {
     const authorization = c.req.header("Authorization");
     if (!authorized(authorization)) return c.json({ error: "unauthorized" }, 401);
@@ -438,11 +497,15 @@ export function createApp(dependencies: Dependencies = {}) {
       const imageBytes = Buffer.from(await image.arrayBuffer());
       const stage = (VIEWS as readonly string[]).includes(meta.stage) ? meta.stage as ViewId : "front";
       const pose = await measureScan([{ view: stage, bytes: imageBytes }]);
+      const scores = practiceProfile(pose.measurements);
       try {
         const result = attachCoachVoice(await runOmniTurn({
           requestId: meta.requestId,
           stage: meta.stage,
-          measurementsJson: JSON.stringify(pose.measurements),
+          measurementsJson: JSON.stringify({
+            measurements: pose.measurements,
+            practiceScores: scores.areas.length ? scores : null,
+          }),
           captureNotes: [
             ...(meta.captureNotes ?? []),
             pose.source === "none" ? "Pose landmarks were unavailable for this frame." : `Pose source ${pose.source}.`,

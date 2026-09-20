@@ -14,18 +14,17 @@ describe("localWellnessCore", () => {
       limitations: ["Projected shoulder line."],
     }]);
     expect(core.observations[0]?.text).toContain("4.2 degrees");
-    expect(core.sources.map((source) => source.id)).toEqual([
-      "ccohs-working-posture",
-      "who-physical-activity-2020",
-      "swain-posture-lbp-2020",
-    ]);
+    expect(core.sources.map((source) => source.id)).toEqual(["ccohs-working-posture"]);
     expect(core.safety.level).toBe("wellness");
+    expect(core.summary).toMatch(/\/100/);
+    expect(core.safety.message).toMatch(/everyday alignment practice/i);
   });
 });
 
 describe("localCoachText", () => {
   it("does not invent numbers when the measurement list is empty", () => {
     expect(localCoachText([])).not.toMatch(/\d/);
-    expect(localCoachText([])).toContain("not medical advice");
+    expect(localCoachText([])).toContain("Good practice");
+    expect(localCoachText([])).not.toContain("not medical advice");
   });
 });

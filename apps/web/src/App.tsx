@@ -2,10 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Measurement, ViewId } from "@align/contracts";
 import {
   aggregateMeasurements,
-  assessFrame,
+  DEFAULT_HOLD,
+  fitBodyGuide,
   holdProgress,
   motionScore,
   nextHoldPhase,
+  practiceProfile,
   type PoseFrame,
   type ViewPhase,
 } from "@align/metrics";
@@ -54,7 +56,7 @@ export default function App() {
   const [view, setView] = useState<ViewId>("front");
   const [phase, setPhase] = useState<ViewPhase>("coaching");
   const [issue, setIssue] = useState("Step into the silhouette.");
-  const [accepted, setAccepted] = useState(0);
+  const [holdAmount, setHoldAmount] = useState(0);
   const [byView, setByView] = useState<Partial<Record<ViewId, Measurement[]>>>({});
   const [saved, setSaved] = useState<SavedScan | null>(null);
   const [history, setHistory] = useState<SavedScan[]>([]);
@@ -65,6 +67,7 @@ export default function App() {
   const cameraOn = screen === "setup" || screen === "capture" || screen === "results";
 
   const measurements = useMemo(() => VIEWS.flatMap((item) => byView[item] ?? []), [byView]);
+  const scores = useMemo(() => practiceProfile(measurements), [measurements]);
 
   useEffect(() => {
     setHistory(loadScans());
@@ -124,7 +127,7 @@ export default function App() {
 
   useEffect(() => {
     if (screen !== "capture" || !frame) return;
-    const quality = assessFrame(frame, view);
+    const quality = fitBodyGuide(frame, view);
     const motion = motionScore(prevFrameRef.current, frame);
     prevFrameRef.current = frame;
     const now = performance.now();
@@ -141,11 +144,12 @@ export default function App() {
     collectStartedAt.current = next.collectStartedAt;
     settleStartedAt.current = next.settleStartedAt;
     setPhase(next.phase);
-    setIssue(quality.issues[0]?.message ?? (next.phase === "collecting" ? "Hold still." : VIEW_COPY[view]));
+    const elapsed = next.phase === "collecting" && next.collectStartedAt ? now - next.collectStartedAt : 0;
+    setHoldAmount(holdProgress(next.phase, elapsed, DEFAULT_HOLD.collectMs));
+    setIssue(quality.issues[0]?.message ?? (next.phase === "collecting" ? "Hold still in the outline." : VIEW_COPY[view]));
     if (next.phase === "collecting" || next.accept) {
       framesRef.current = [...framesRef.current, frame].slice(-40);
       acceptedRef.current += 1;
-      setAccepted(acceptedRef.current);
     }
     if (next.accept) {
       const measured = aggregateMeasurements(framesRef.current, view);
@@ -153,7 +157,6 @@ export default function App() {
       const index = VIEWS.indexOf(view);
       framesRef.current = [];
       acceptedRef.current = 0;
-      setAccepted(0);
       collectStartedAt.current = null;
       settleStartedAt.current = null;
       viewStartedAt.current = performance.now();
@@ -167,7 +170,6 @@ export default function App() {
     if (next.phase === "retry") {
       framesRef.current = [];
       acceptedRef.current = 0;
-      setAccepted(0);
       collectStartedAt.current = null;
       settleStartedAt.current = null;
       viewStartedAt.current = performance.now();
@@ -180,7 +182,7 @@ export default function App() {
     setSaved(null);
     setView("front");
     setPhase("coaching");
-    setAccepted(0);
+    setHoldAmount(0);
     acceptedRef.current = 0;
     framesRef.current = [];
     viewStartedAt.current = 0;
@@ -245,7 +247,7 @@ export default function App() {
     }
   }
 
-  const progress = holdProgress(phase, accepted);
+  const progress = holdAmount;
 
   return (
     <div className="app">
@@ -283,7 +285,7 @@ export default function App() {
           <p>Pose estimation runs locally in this browser. Frames used for overlay are not uploaded for that live skeleton.</p>
           <p>
             If you ask the coach a question, this app sends one selected image, a short audio clip, and the already computed
-            measurements to OMNI. You can still complete a scan without that.
+            measurements to OMNI. You can still complete a scan without that. Guidance is everyday good practice from your photos.
           </p>
           <label className="row">
             <input type="checkbox" checked={allowCloud} onChange={(event) => setAllowCloud(event.target.checked)} />
@@ -362,8 +364,25 @@ export default function App() {
 
       {screen === "results" && (
         <section className="panel stack">
-          <h1>Supported measurements</h1>
-          <p>These are projected camera measurements, not millimetres or a clinical score. 100/100 posture scoring is deferred.</p>
+          <h1>Camera alignment practice</h1>
+          <p>These are projected camera measurements and 0–100 practice scores from the metric engine, not a clinical grade.</p>
+          {scores.areas.length > 0 && (
+            <div className="grid-2">
+              <article className="card">
+                <b>Overall practice</b>
+                <div>{scores.overall}/100</div>
+                <p className="small">Everyday camera-alignment practice from your four holds.</p>
+              </article>
+              {scores.areas.map((area) => (
+                <article className="card" key={area.id}>
+                  <b>{area.label} · {area.view}</b>
+                  <div>{area.score}/100</div>
+                  <p className="small">{area.improve}</p>
+                  <p className="small">{area.whyCommon}</p>
+                </article>
+              ))}
+            </div>
+          )}
           <div className="grid-2">
             {measurements.length === 0 && <p>No supported measurements were retained. Retry a view with a steadier hold.</p>}
             {measurements.map((item) => (

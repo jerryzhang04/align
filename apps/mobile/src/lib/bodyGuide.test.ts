@@ -1,24 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { bodyGuideVariant, holdFill, holdReadyToCapture, scanActionLabel, scanInstruction, scanPhaseLabel, VIEW_HOLD_MS } from "./bodyGuide";
+import { bodyGuideVariant, holdFill, holdReadyToCapture, scanActionLabel, scanInstruction, scanPhaseLabel, tickHoldFill, VIEW_FILL_MS } from "./bodyGuide";
 
-describe("holdFill", () => {
-  it("stays empty until the hold starts", () => {
+describe("tickHoldFill", () => {
+  it("stays empty until the stance is valid", () => {
+    expect(tickHoldFill(0, 800, false)).toBe(0);
     expect(holdFill(0)).toBe(0);
-    expect(holdFill(-20)).toBe(0);
   });
 
-  it("fills linearly to one when the hold completes", () => {
-    expect(holdFill(VIEW_HOLD_MS / 2)).toBe(0.5);
-    expect(holdFill(VIEW_HOLD_MS)).toBe(1);
-    expect(holdFill(VIEW_HOLD_MS + 400)).toBe(1);
+  it("fills only while aligned and drains when they leave", () => {
+    const half = tickHoldFill(0, VIEW_FILL_MS / 2, true);
+    expect(half).toBeCloseTo(0.5, 5);
+    expect(tickHoldFill(half, 420, false, VIEW_FILL_MS, 420)).toBeCloseTo(0, 5);
   });
 });
 
 describe("holdReadyToCapture", () => {
-  it("captures once the outline is full and this view is still open", () => {
-    expect(holdReadyToCapture(VIEW_HOLD_MS, false)).toBe(true);
-    expect(holdReadyToCapture(VIEW_HOLD_MS - 1, false)).toBe(false);
-    expect(holdReadyToCapture(VIEW_HOLD_MS, true)).toBe(false);
+  it("captures only when the outline is full and the stance is still valid", () => {
+    expect(holdReadyToCapture(1, false, true)).toBe(true);
+    expect(holdReadyToCapture(1, false, false)).toBe(false);
+    expect(holdReadyToCapture(0.99, false, true)).toBe(false);
+    expect(holdReadyToCapture(1, true, true)).toBe(false);
   });
 });
 
@@ -40,11 +41,16 @@ describe("scanInstruction", () => {
     expect(scanInstruction("right", true)).toContain("right side");
     expect(scanInstruction("left", true)).toContain("left side");
   });
+
+  it("prefers a live stance hint from pose preview", () => {
+    expect(scanInstruction("front", true, "Step closer until your head and feet fill the outline.")).toContain("Step closer");
+  });
 });
 
 describe("scanActionLabel", () => {
   it("shows fill percent until the photo locks, then names the save", () => {
-    expect(scanActionLabel({ cameraReady: true, liveStarted: true, busy: false, locked: false, fill: 0.4 })).toBe("40% filled");
+    expect(scanActionLabel({ cameraReady: true, liveStarted: true, busy: false, locked: false, fill: 0.4, aligned: true })).toBe("40% filled");
+    expect(scanActionLabel({ cameraReady: true, liveStarted: true, busy: false, locked: false, fill: 0, aligned: false })).toBe("Match the outline");
     expect(scanActionLabel({ cameraReady: true, liveStarted: true, busy: false, locked: true, fill: 1 })).toBe("Photo saved");
   });
 });

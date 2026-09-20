@@ -16,7 +16,7 @@ const STANDARD_LIMITATIONS = [
 const NO_VERIFIED_ANGLE = "No diagnosis or verified posture angle was produced.";
 const PROJECTED_ANGLE = "Quoted angles come from pose landmarks on phone images, not a clinical examination.";
 
-export function validateGuidanceDraft(input: unknown, measurements: Measurement[] = []) {
+export function validateGuidanceDraft(input: unknown, measurements: Measurement[] = [], practiceScores: number[] = []) {
   const draft: ModelGuidanceDraft = modelGuidanceDraftSchema.parse(input);
   const allText = [
     draft.summary,
@@ -25,6 +25,9 @@ export function validateGuidanceDraft(input: unknown, measurements: Measurement[
   ].join(" ");
   if (forbidden.test(allText)) throw new Error("forbidden_medical_claim");
   if ((measurements.length ? unverifiedPrecision : numericFinding).test(allText)) throw new Error("invented_numeric_finding");
+  const quotedScores = [...allText.matchAll(/\b(\d{1,3})\s*\/\s*100\b/g)].map((match) => Number(match[1]));
+  const allowedScores = new Set(practiceScores.filter((value) => Number.isInteger(value)));
+  if (quotedScores.some((value) => !allowedScores.has(value))) throw new Error("invented_numeric_finding");
   if (draft.safetySignalIds.some((id) => !allowedSignals.has(id))) throw new Error("unknown_safety_signal");
 
   const sourceIds = draft.actions.flatMap((action) => action.sourceIds);
@@ -45,7 +48,7 @@ export function validateGuidanceDraft(input: unknown, measurements: Measurement[
         }
       : {
           level: "wellness" as const,
-          message: "This is general wellness guidance based on a short phone capture, not medical advice.",
+          message: "This recap is everyday alignment practice from a short phone capture.",
           signalIds: [],
         };
 

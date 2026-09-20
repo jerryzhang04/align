@@ -33,7 +33,7 @@ describe("guidance model adapter", () => {
     expect(body.indexOf("RIGHT")).toBeLessThan(body.indexOf("BACK"));
     expect(body.indexOf("BACK")).toBeLessThan(body.indexOf("LEFT"));
     expect(body).toContain("AUDIO");
-    expect(body).toContain("data:audio/mp4;base64,AUDIO");
+    expect(body).toContain("data:audio/aac;base64,AUDIO");
     expect(buildAnalysisRequest(input, {
       configured: true,
       mode: "unconfigured",

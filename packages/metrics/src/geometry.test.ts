@@ -136,21 +136,21 @@ describe("hold machine", () => {
     });
     expect(first.phase).toBe("settling");
     const collecting = nextHoldPhase({
-      now: 1700,
+      now: 1900,
       viewStartedAt: 0,
       qualityOk: true,
       motion: 0,
-      accepted: 14,
+      accepted: 17,
       collectStartedAt: null,
       settleStartedAt: 1000,
     });
     expect(collecting.phase).toBe("collecting");
     const done = nextHoldPhase({
-      now: 3800,
+      now: 4800,
       viewStartedAt: 0,
       qualityOk: true,
       motion: 0,
-      accepted: 14,
+      accepted: 17,
       collectStartedAt: collecting.collectStartedAt,
       settleStartedAt: collecting.settleStartedAt,
     });

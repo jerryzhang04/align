@@ -29,35 +29,46 @@ export function encodeWav(samples: Float32Array, sampleRate: number): Blob {
   return new Blob([buffer], { type: "audio/wav" });
 }
 
-export async function recordWav(maxMs = 8000): Promise<Blob> {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+async function startCaptureGraph(stream: MediaStream) {
   const context = new AudioContext({ sampleRate: 16000 });
+  if (context.state === "suspended") await context.resume();
   const source = context.createMediaStreamSource(stream);
   const processor = context.createScriptProcessor(4096, 1, 1);
+  const mute = context.createGain();
+  mute.gain.value = 0;
   const chunks: Float32Array[] = [];
   processor.onaudioprocess = (event) => {
     chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
   };
   source.connect(processor);
-  processor.connect(context.destination);
+  processor.connect(mute);
+  mute.connect(context.destination);
+  return { context, source, processor, mute, chunks, stream };
+}
+
+export async function recordWav(maxMs = 8000): Promise<Blob> {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  const graph = await startCaptureGraph(stream);
 
   await new Promise<void>((resolve) => {
     window.setTimeout(resolve, maxMs);
   });
 
-  processor.disconnect();
-  source.disconnect();
-  stream.getTracks().forEach((track) => track.stop());
-  await context.close();
+  graph.processor.disconnect();
+  graph.source.disconnect();
+  graph.mute.disconnect();
+  graph.stream.getTracks().forEach((track) => track.stop());
+  const sampleRate = graph.context.sampleRate || 16000;
+  await graph.context.close();
 
-  const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const length = graph.chunks.reduce((sum, chunk) => sum + chunk.length, 0);
   const samples = new Float32Array(length);
   let offset = 0;
-  for (const chunk of chunks) {
+  for (const chunk of graph.chunks) {
     samples.set(chunk, offset);
     offset += chunk.length;
   }
-  return encodeWav(samples, context.sampleRate || 16000);
+  return encodeWav(samples, sampleRate);
 }
 
 export function recordPushToTalk(): {
@@ -66,31 +77,20 @@ export function recordPushToTalk(): {
   let stopFn: (() => Promise<Blob>) | null = null;
   const ready = (async () => {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    const context = new AudioContext({ sampleRate: 16000 });
-    const source = context.createMediaStreamSource(stream);
-    const processor = context.createScriptProcessor(4096, 1, 1);
-    const chunks: Float32Array[] = [];
-    processor.onaudioprocess = (event) => {
-      chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
-    };
-    source.connect(processor);
-    processor.connect(context.destination);
-    const started = Date.now();
+    const graph = await startCaptureGraph(stream);
     stopFn = async () => {
-      processor.disconnect();
-      source.disconnect();
-      stream.getTracks().forEach((track) => track.stop());
-      const sampleRate = context.sampleRate || 16000;
-      await context.close();
-      const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+      graph.processor.disconnect();
+      graph.source.disconnect();
+      graph.mute.disconnect();
+      graph.stream.getTracks().forEach((track) => track.stop());
+      const sampleRate = graph.context.sampleRate || 16000;
+      await graph.context.close();
+      const length = graph.chunks.reduce((sum, chunk) => sum + chunk.length, 0);
       const samples = new Float32Array(length);
       let offset = 0;
-      for (const chunk of chunks) {
+      for (const chunk of graph.chunks) {
         samples.set(chunk, offset);
         offset += chunk.length;
-      }
-      if (Date.now() - started < 250) {
-        return encodeWav(samples, sampleRate);
       }
       return encodeWav(samples, sampleRate);
     };

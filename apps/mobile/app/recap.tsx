@@ -9,6 +9,7 @@ import { MeasurementList } from "../src/components/MeasurementList";
 import { CAPTURE_VIEWS, captureProgress } from "../src/lib/captureFlow";
 import { discardLocalFiles, finalizeCaptures } from "../src/services/captures";
 import { cacheCoachAudio } from "../src/services/audioFile";
+import { playCachedCoachAudio } from "../src/lib/coachPlayback";
 import { saveSession } from "../src/services/history";
 import { localWellnessReport } from "../src/lib/localGuidance";
 import { useScan } from "../src/state/ScanContext";
@@ -32,15 +33,18 @@ export default function RecapScreen() {
 
   useEffect(() => {
     if (!displayReport.audioBase64) return;
-    try {
-      const file = cacheCoachAudio(displayReport.audioBase64, displayReport.audioMime);
-      reportAudioFile.current = file;
-      player.replace(file);
-      player.play();
-    } catch {
-      // Guidance stays readable even if native audio playback is unavailable.
-    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const file = cacheCoachAudio(displayReport.audioBase64!, displayReport.audioMime);
+        reportAudioFile.current = file;
+        if (!cancelled) await playCachedCoachAudio(player, file);
+      } catch {
+        // Guidance stays readable even if native audio playback is unavailable.
+      }
+    })();
     return () => {
+      cancelled = true;
       void discardLocalFiles(reportAudioFile.current);
     };
   }, [displayReport, player]);
@@ -68,7 +72,7 @@ export default function RecapScreen() {
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <View style={styles.successIcon}><SymbolView name="checkmark" size={31} tintColor={colors.white} weight="bold" /></View>
       <Text accessibilityRole="header" style={styles.title}>Your four views are saved.</Text>
-      <Text style={styles.lead}>{progress.accepted} milestone views retained from the continuous scan. This confirms capture coverage—not posture quality.</Text>
+      <Text style={styles.lead}>{progress.accepted} milestone views retained from the continuous scan. Scores below come from pose landmarks on these photos.</Text>
 
       <View style={styles.gallery}>
         {CAPTURE_VIEWS.map((view) => (
@@ -79,13 +83,34 @@ export default function RecapScreen() {
         ))}
       </View>
 
+      {displayReport.practiceScores ? (
+        <View style={styles.scoreCard}>
+          <Text style={styles.coachLabel}>CAMERA ALIGNMENT PRACTICE</Text>
+          <Text style={styles.scoreOverall}>{displayReport.practiceScores.overall}/100</Text>
+          <Text style={styles.scoreLead}>Everyday good practice from your four photos — not a clinical grade.</Text>
+          {displayReport.practiceScores.areas.map((area) => (
+            <View key={area.id} style={styles.scoreRow}>
+              <View style={styles.scoreHead}>
+                <Text style={styles.scoreLabel}>{area.label}</Text>
+                <Text style={styles.scoreValue}>{area.score}/100</Text>
+              </View>
+              <View style={styles.scoreTrack}>
+                <View style={[styles.scoreFill, { width: `${area.score}%` }]} />
+              </View>
+              <Text style={styles.guidanceBody}>{area.improve}</Text>
+              <Text style={styles.guidanceRationale}>{area.whyCommon}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
       <MeasurementList
         measurements={measurements.length ? measurements : displayReport.measurements}
         localOnly={!cloudCoachEnabled}
       />
 
       <View style={styles.coachCard}>
-        <Text style={styles.coachLabel}>{displayReport.speechProvider === "omni" ? "EVIDENCE-BACKED GUIDANCE" : "WELLNESS GUIDANCE"}</Text>
+        <Text style={styles.coachLabel}>{displayReport.speechProvider === "omni" ? "PERSONALIZED PRACTICE" : "EVERYDAY GOOD PRACTICE"}</Text>
         {displayReport.safety.level !== "wellness" ? <Text style={styles.safetyText}>{displayReport.safety.message}</Text> : null}
         <Text style={styles.coachText}>{displayReport.summary}</Text>
         {displayReport.observations.map((observation) => (
@@ -119,7 +144,7 @@ export default function RecapScreen() {
         <PrimaryButton label="Retake the scan" variant="secondary" onPress={() => { reset(); router.replace("/setup"); }} />
       </View>
 
-      <Text style={styles.footnote}>Align is a wellness capture tool, not a medical device. It does not diagnose posture or spinal conditions.</Text>
+      <Text style={styles.footnote}>Align is a daily-practice capture tool. It does not diagnose conditions.</Text>
     </ScrollView>
   );
 }
@@ -137,6 +162,15 @@ const styles = StyleSheet.create({
   captureFooter: { minHeight: 44, paddingHorizontal: spacing.md, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   captureLabel: { color: colors.ink, fontSize: 14, fontWeight: "700" },
   coachCard: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.sm, borderWidth: 1, borderColor: colors.line },
+  scoreCard: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.sm, borderWidth: 1, borderColor: colors.line },
+  scoreOverall: { color: colors.ink, fontSize: 42, fontWeight: "800", fontVariant: ["tabular-nums"] },
+  scoreLead: { color: colors.muted, fontSize: 14, lineHeight: 20 },
+  scoreRow: { gap: 4, paddingTop: spacing.sm },
+  scoreHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" },
+  scoreLabel: { color: colors.ink, fontSize: 15, fontWeight: "800" },
+  scoreValue: { color: colors.tealDark, fontSize: 16, fontWeight: "800", fontVariant: ["tabular-nums"] },
+  scoreTrack: { height: 8, borderRadius: 99, backgroundColor: colors.line, overflow: "hidden" },
+  scoreFill: { height: "100%", borderRadius: 99, backgroundColor: colors.teal },
   coachLabel: { color: colors.tealDark, fontSize: 11, fontWeight: "900", letterSpacing: 1.1 },
   coachText: { color: colors.ink, fontSize: 16, lineHeight: 23 },
   safetyText: { color: colors.coral, fontSize: 15, lineHeight: 22, fontWeight: "800" },

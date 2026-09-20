@@ -158,6 +158,25 @@ describe("guidance API", () => {
     expect(body.pose).toEqual({ source: "movenet-lightning", viewsWithPose: ["front"] });
   });
 
+  it("previews stance without filling a live session", async () => {
+    const app = api({
+      provider: () => provider,
+      previewStance: async () => ({
+        aligned: true,
+        still: true,
+        pose: true,
+        issues: [],
+        frame: { width: 10, height: 10, landmarks: [] },
+      }),
+    });
+    const form = new FormData();
+    form.set("meta", JSON.stringify({ requestId: "p1", scanId: "s1", view: "front" }));
+    form.set("image", new Blob(["jpeg"], { type: "image/jpeg" }), "preview.jpg");
+    const response = await app.request("/v1/pose/preview", { method: "POST", body: form });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ requestId: "p1", aligned: true, still: true, pose: true });
+  });
+
   it("measures pose without calling OMNI", async () => {
     const app = api({
       provider: () => provider,

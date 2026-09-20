@@ -9,12 +9,30 @@ export type HoldConfig = {
 };
 
 export const DEFAULT_HOLD: HoldConfig = {
-  settleMs: 600,
-  collectMs: 2000,
-  minSamples: 15,
-  timeoutMs: 20_000,
-  maxMotion: 0.012,
+  settleMs: 800,
+  collectMs: 2800,
+  minSamples: 18,
+  timeoutMs: 30_000,
+  maxMotion: 0.01,
 };
+
+/** Face ID-style dwell: fill only while aligned, empty quickly when they leave. */
+export function tickHoldFill(
+  progress: number,
+  dtMs: number,
+  canFill: boolean,
+  fillMs = DEFAULT_HOLD.collectMs,
+  decayMs = 420,
+): number {
+  const current = Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
+  if (!Number.isFinite(dtMs) || dtMs <= 0) return current;
+  if (canFill) {
+    if (!Number.isFinite(fillMs) || fillMs <= 0) return 1;
+    return Math.min(1, current + dtMs / fillMs);
+  }
+  if (!Number.isFinite(decayMs) || decayMs <= 0) return 0;
+  return Math.max(0, current - dtMs / decayMs);
+}
 
 export type HoldSnapshot = {
   phase: ViewPhase;
@@ -57,9 +75,14 @@ export function nextHoldPhase(input: {
   return { phase: "collecting", collectStartedAt, settleStartedAt, accept: false };
 }
 
-export function holdProgress(phase: ViewPhase, accepted: number, minSamples = DEFAULT_HOLD.minSamples): number {
+export function holdProgress(
+  phase: ViewPhase,
+  collectElapsedMs = 0,
+  collectMs = DEFAULT_HOLD.collectMs,
+): number {
   if (phase === "accepted") return 1;
-  if (phase === "collecting") return Math.min(0.95, accepted / minSamples);
-  if (phase === "settling") return 0.12;
-  return 0;
+  if (phase !== "collecting") return 0;
+  if (!Number.isFinite(collectMs) || collectMs <= 0) return 0.99;
+  if (!Number.isFinite(collectElapsedMs) || collectElapsedMs <= 0) return 0;
+  return Math.min(0.99, collectElapsedMs / collectMs);
 }

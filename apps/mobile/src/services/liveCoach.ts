@@ -72,7 +72,7 @@ export function createLiveCoachClient({ baseUrl, token, fetchImpl = fetch }: Cli
         captureNotes: input.captureNotes ?? [],
         locale: input.locale ?? "en-CA",
       }));
-      form.append("audio", { uri: input.audioUri, name: "goal.m4a", type: "audio/mp4" } as unknown as Blob);
+      form.append("audio", { uri: input.audioUri, name: input.audioUri.toLowerCase().includes(".wav") ? "goal.wav" : "goal.m4a", type: input.audioUri.toLowerCase().includes(".wav") ? "audio/wav" : "audio/mp4" } as unknown as Blob);
       const response = await fetchImpl(sessionUrl(input.scanId, "finalize"), {
         method: "POST",
         body: form,

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { audioOutputEnabled, contentParts } from "./omni.js";
+import { audioOutputEnabled, contentParts, omniAudioFormat } from "./omni.js";
 
 const input = {
   requestId: "r1",
@@ -26,6 +26,17 @@ describe("contentParts", () => {
 
     expect(audio.input_audio.data).toBe("data:audio/wav;base64,AUDIODATA");
     expect(audio.input_audio.format).toBe("wav");
+  });
+
+  it("labels iPhone m4a recordings as aac for Qwen Omni", () => {
+    expect(omniAudioFormat("audio/mp4")).toBe("aac");
+    expect(omniAudioFormat("audio/m4a")).toBe("aac");
+    process.env.OMNI_BASE_URL = "https://yibuapi.com/v1";
+    const audio = contentParts({ ...input, audioFormat: "audio/mp4" }, true).find((p) => p.type === "input_audio") as {
+      input_audio: { data: string; format: string };
+    };
+    expect(audio.input_audio.format).toBe("aac");
+    expect(audio.input_audio.data).toBe("data:audio/aac;base64,AUDIODATA");
   });
 
   it("sends the image as a data: URI, which image_url does require", () => {

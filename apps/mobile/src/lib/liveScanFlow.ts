@@ -1,8 +1,13 @@
 export {
   VIEW_HOLD_MS,
+  VIEW_FILL_MS,
   VIEW_LOCK_MS,
+  VIEW_DECAY_MS,
+  PREVIEW_INTERVAL_MS,
+  LOCAL_FILL_MS,
   bodyGuideVariant,
   holdFill,
+  tickHoldFill,
   holdReadyToCapture,
   scanActionLabel,
   scanHint,

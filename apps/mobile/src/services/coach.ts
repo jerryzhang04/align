@@ -5,13 +5,16 @@ import {
   guidanceReportSchema,
   healthResponseSchema,
   poseMeasureResponseSchema,
+  posePreviewResponseSchema,
   type CoachTurnResponse,
   type GuidanceReport,
   type HealthResponse,
   type PoseMeasureResponse,
+  type PosePreviewResponse,
   type ViewId,
 } from "@align/contracts";
 import type { Captures } from "../lib/captureFlow";
+import { recordingUpload } from "../lib/audioUpload";
 
 function connection() {
   return runtimeCoachApi();
@@ -52,7 +55,8 @@ export async function askCoach(input: {
     captureNotes: ["Native guided capture."],
   }));
   form.append("image", { uri: input.imageUri, name: "coach-frame.jpg", type: "image/jpeg" } as unknown as Blob);
-  form.append("audio", { uri: input.audioUri, name: "question.m4a", type: "audio/mp4" } as unknown as Blob);
+  const audio = recordingUpload(input.audioUri);
+  form.append("audio", { uri: input.audioUri, name: audio.name, type: audio.type } as unknown as Blob);
 
   const response = await fetchWithTimeout(`${baseUrl}/v1/coach/turn`, {
     method: "POST",
@@ -92,7 +96,7 @@ export async function requestGuidance(input: {
     if (!uri) throw new Error("missing_capture");
     form.append(view, { uri, name: `${view}.jpg`, type: "image/jpeg" } as unknown as Blob);
   }
-  form.append("audio", { uri: input.audioUri, name: "goal.m4a", type: "audio/mp4" } as unknown as Blob);
+  form.append("audio", { uri: input.audioUri, name: recordingUpload(input.audioUri).name, type: recordingUpload(input.audioUri).type } as unknown as Blob);
   const response = await fetchWithTimeout(`${baseUrl}/v1/guidance/report`, {
     method: "POST",
     body: form,
@@ -131,4 +135,30 @@ export async function requestPoseMeasurements(input: {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string" ? payload.error : "pose_failed");
   return parseOk(poseMeasureResponseSchema, payload, "coach_invalid_response");
+}
+
+export async function previewStance(input: {
+  requestId: string;
+  scanId: string;
+  view: ViewId;
+  imageUri: string;
+  signal?: AbortSignal;
+}): Promise<PosePreviewResponse> {
+  const { baseUrl, token } = connection();
+  const form = new FormData();
+  form.append("meta", JSON.stringify({
+    requestId: input.requestId,
+    scanId: input.scanId,
+    view: input.view,
+  }));
+  form.append("image", { uri: input.imageUri, name: "preview.jpg", type: "image/jpeg" } as unknown as Blob);
+  const response = await fetchWithTimeout(`${baseUrl}/v1/pose/preview`, {
+    method: "POST",
+    body: form,
+    headers: headers(token),
+    signal: input.signal,
+  }, 8_000);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string" ? payload.error : "pose_failed");
+  return parseOk(posePreviewResponseSchema, payload, "coach_invalid_response");
 }

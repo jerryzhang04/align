@@ -40,6 +40,28 @@ describe("validateGuidanceDraft", () => {
     expect(result.observations[0]?.text).toContain("12 degrees");
   });
 
+  it("allows quoting metric-engine practice scores", () => {
+    const result = validateGuidanceDraft(
+      { ...safeDraft, summary: "Shoulder level is 90/100 on this capture." },
+      [{
+        id: "shoulder_line_tilt",
+        value: 1.2,
+        unit: "deg",
+        view: "front",
+        definitionVersion: "2026-09-19.1",
+        sampleCount: 1,
+        quality: "limited",
+        limitations: ["test"],
+      }],
+      [90],
+    );
+    expect(result.summary).toContain("90/100");
+  });
+
+  it("rejects a practice score that was not supplied", () => {
+    expect(() => validateGuidanceDraft({ ...safeDraft, summary: "This is 99/100 posture." })).toThrow("invented_numeric_finding");
+  });
+
   it("turns urgent signals into deterministic escalation and removes wellness actions", () => {
     const result = validateGuidanceDraft({ ...safeDraft, safetySignalIds: ["bladder_bowel_change"] });
     expect(result.safety.level).toBe("urgent-care");

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { localWellnessReport } from "./localGuidance";
 
 describe("localWellnessReport", () => {
-  it("quotes only supplied degree measurements and stays inside screening language", () => {
+  it("quotes supplied measurements as a personalized practice score", () => {
     const report = localWellnessReport({
       requestId: "scan-1",
       measurements: [{
@@ -18,19 +18,17 @@ describe("localWellnessReport", () => {
     });
 
     expect(report.observations[0]?.text).toContain("4.2 degrees");
-    expect(report.summary).not.toMatch(/diagnos|scoliosis/i);
-    expect(report.sources.map((source) => source.id)).toEqual([
-      "ccohs-working-posture",
-      "who-physical-activity-2020",
-      "swain-posture-lbp-2020",
-    ]);
+    expect(report.summary).toMatch(/\/100/);
+    expect(report.summary).not.toMatch(/diagnos|scoliosis|not medical advice/i);
+    expect(report.practiceScores?.overall).toBeGreaterThan(0);
     expect(report.speechProvider).toBe("none");
   });
 
-  it("still returns evidence-backed actions when no angles were measured", () => {
+  it("still returns everyday-practice actions when no angles were measured", () => {
     const report = localWellnessReport({ requestId: "scan-2", measurements: [] });
     expect(report.observations).toEqual([]);
     expect(report.actions.length).toBeGreaterThan(0);
-    expect(report.summary).toContain("No verified posture angles");
+    expect(report.practiceScores).toBeNull();
+    expect(report.summary).toContain("everyday good practice");
   });
 });

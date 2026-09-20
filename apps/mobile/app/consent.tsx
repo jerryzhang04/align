@@ -36,7 +36,7 @@ export default function ConsentScreen() {
       </View>
 
       <View style={styles.note}>
-        <Text style={styles.noteTitle}>Wellness guidance, not medical advice</Text>
+        <Text style={styles.noteTitle}>Everyday good practice</Text>
         <Text style={styles.noteBody}>Stop if you feel pain or dizziness. Align does not diagnose conditions or replace a clinician.</Text>
       </View>
 
