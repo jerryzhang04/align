@@ -33,12 +33,12 @@ export function holdReadyToCapture(progress: number, alreadyCaptured: boolean, c
 export function scanInstruction(view: ViewId, started: boolean, stanceHint = "") {
   if (stanceHint) return stanceHint;
   if (!started) {
-    return "Stand on the marker so your head and shoulders match the outline, then start.";
+    return "Keep your head and shoulders centered, with both feet visible.";
   }
-  if (view === "front") return "Match your head and shoulders to the outline. The bar fills only while you hold that stance.";
-  if (view === "right") return "Turn so your right side fits the outline. Hold still once it starts filling.";
-  if (view === "back") return "Face away and match your head and shoulders. Hold still once it starts filling.";
-  return "Turn so your left side fits the outline. Hold still once it starts filling.";
+  if (view === "front") return "Face the camera squarely. Keep your full body visible and hold still.";
+  if (view === "right") return "Turn a quarter turn: your right side toward the camera. Hold still.";
+  if (view === "back") return "Turn another quarter turn: face away from the camera. Hold still.";
+  return "Turn once more: your left side toward the camera. Hold still.";
 }
 
 export function scanPhaseLabel(view: ViewId, started: boolean, awaitingGuidance: boolean) {
@@ -52,18 +52,18 @@ export function scanPhaseLabel(view: ViewId, started: boolean, awaitingGuidance:
 
 export function scanHint(started: boolean, awaitingGuidance: boolean, cloudCoachEnabled: boolean) {
   if (awaitingGuidance) {
-    return "Tap once to record your goal, then tap again to send it with the four photos.";
+    return "Analysis works without a recording. Add voice only if you want to ask the coach a question.";
   }
   if (started && cloudCoachEnabled) {
-    return "The outline fills only while you match it and hold still, like Face ID. Leaving the outline empties it.";
+    return "Auto saves after 3 steady checks. Capture now is always available if a check gets stuck.";
   }
   if (started) {
-    return "Hold still in the outline until it fills green, then turn to the next view.";
+    return "Capture each named view when ready. Photos stay on this iPhone.";
   }
   if (cloudCoachEnabled) {
-    return "Line up your head and shoulders. Four photos, then you can talk to the coach.";
+    return "The outline shows the view, not an exact body shape to match. Keep your head and feet visible.";
   }
-  return "Line up your head and shoulders. Photos stay on this iPhone.";
+  return "Show your whole body. Photos stay on this iPhone.";
 }
 
 export function scanActionLabel(args: {

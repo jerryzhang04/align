@@ -1,3 +1,4 @@
+import { postureReferenceContext } from "./postureReference.js";
 import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -87,7 +88,7 @@ export function createApp(dependencies: Dependencies = {}) {
   const previewFrames = new Map<string, PoseFrame>();
   const previewStance = dependencies.previewStance ?? (async (bytes: Uint8Array, view: ViewId, previous: PoseFrame | null) => {
     const { estimatePoseFromJpeg } = await import("./poseEstimate.js");
-    return previewStanceFromJpeg(bytes, view, previous, estimatePoseFromJpeg);
+    return previewStanceFromJpeg(bytes, view, previous, (image) => estimatePoseFromJpeg(image, { preview: true }));
   });
   const recentPreviews = new Map<string, number[]>();
 
@@ -119,7 +120,7 @@ export function createApp(dependencies: Dependencies = {}) {
       }, input.config, input.signal);
       const core = validateGuidanceDraft(draft, input.pose.measurements, practiceScoreInts(scores));
       const voice = await speak(narration(core), input.config, input.signal).catch((error) => {
-        if (input.signal.aborted) throw error;
+        if (input.signal.aborted && input.signal.reason?.name !== "TimeoutError") throw error;
         console.warn("guidance_speech_unavailable", input.requestId);
         return {} as { audioBase64?: string; audioMime?: string };
       });
@@ -132,7 +133,7 @@ export function createApp(dependencies: Dependencies = {}) {
         startedAt: input.startedAt,
       });
     } catch (error) {
-      if ((error instanceof Error && error.name === "AbortError") || input.signal.aborted) throw error;
+      if (input.signal.aborted ? input.signal.reason?.name !== "TimeoutError" : error instanceof Error && error.name === "AbortError") throw error;
       console.warn("guidance_fallback_local", input.requestId, error instanceof Error ? error.message : error);
       return assembleGuidanceReport({
         requestId: input.requestId,
@@ -331,14 +332,14 @@ export function createApp(dependencies: Dependencies = {}) {
 
     const files = meta.views.map((view) => ({ view, file: body[view] }));
     const audio = body.audio;
-    if (files.some(({ file }) => !(file instanceof File)) || !(audio instanceof File)) {
+    if (files.some(({ file }) => !(file instanceof File))) {
       return c.json({ error: "missing_media", requestId: meta.requestId }, 400);
     }
     if (files.some(({ file }) => {
       const image = file as File;
       return !ALLOWED_IMAGE.has(image.type) || image.size > LIMITS.imageBytes;
     })) return c.json({ error: "invalid_image", requestId: meta.requestId }, 400);
-    if (!acceptableAudio(audio)) {
+    if (audio !== undefined && (!(audio instanceof File) || !acceptableAudio(audio))) {
       return c.json({ error: "invalid_audio", requestId: meta.requestId }, 400);
     }
 
@@ -362,8 +363,8 @@ export function createApp(dependencies: Dependencies = {}) {
         requestId: meta.requestId,
         scanId: meta.scanId,
         images,
-        audioBase64: Buffer.from(await audio.arrayBuffer()).toString("base64"),
-        audioFormat: audio.type,
+        audioBase64: audio instanceof File ? Buffer.from(await audio.arrayBuffer()).toString("base64") : "",
+        audioFormat: audio instanceof File ? audio.type : "",
         captureNotes: [
           ...(meta.captureNotes ?? []),
           pose.source === "none" ? "Pose landmarks were unavailable for this scan." : `Pose source ${pose.source}.`,
@@ -496,15 +497,17 @@ export function createApp(dependencies: Dependencies = {}) {
     try {
       const imageBytes = Buffer.from(await image.arrayBuffer());
       const stage = (VIEWS as readonly string[]).includes(meta.stage) ? meta.stage as ViewId : "front";
-      const pose = await measureScan([{ view: stage, bytes: imageBytes }]);
-      const scores = practiceProfile(pose.measurements);
+      // A pose service outage must not prevent OMNI from hearing the question.
+      const pose = await measureScan([{ view: stage, bytes: imageBytes }]).catch((): ScanPoseResult => ({
+        measurements: [], source: "none", viewsWithPose: [],
+      }));
       try {
         const result = attachCoachVoice(await runOmniTurn({
           requestId: meta.requestId,
           stage: meta.stage,
           measurementsJson: JSON.stringify({
             measurements: pose.measurements,
-            practiceScores: scores.areas.length ? scores : null,
+            postureReferences: postureReferenceContext(pose.measurements),
           }),
           captureNotes: [
             ...(meta.captureNotes ?? []),

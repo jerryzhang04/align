@@ -38,6 +38,10 @@ describe("fitBodyGuide", () => {
     expect(fitBodyGuide(standingFront(), "front").ok).toBe(true);
   });
 
+  it("accepts a full body in the visible guide below the controls", () => {
+    expect(fitBodyGuide(standingFront(0, 0.6), "front").ok).toBe(true);
+  });
+
   it("rejects a person who is too far from the camera", () => {
     const result = fitBodyGuide(standingFront(0, 0.35), "front");
     expect(result.ok).toBe(false);

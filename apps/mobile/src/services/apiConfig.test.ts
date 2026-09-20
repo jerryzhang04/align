@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { hostnameFromHint, isLoopbackHost, resolveCoachApiUrl, sameLanSite } from "./apiConfig";
 
 describe("resolveCoachApiUrl", () => {
+  it("preserves an explicit HTTPS API when Metro runs on a different host", () => {
+    expect(resolveCoachApiUrl({ envUrl: "https://align.example.com/api", hostHints: ["192.168.1.44:8081"] }).baseUrl)
+      .toBe("https://align.example.com/api");
+  });
+
   it("keeps an explicit LAN API URL when it matches Expo's host network", () => {
     expect(resolveCoachApiUrl({
       envUrl: "http://192.168.1.44:8788",

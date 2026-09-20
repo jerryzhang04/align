@@ -1,20 +1,25 @@
-# Installed iPhone demo
+# Hackathon demo rehearsal
 
-Keep the Mac and iPhone on the same Wi-Fi. Use `npm run iphone:dev` for the installed development build. If it is already running, reload Align from its development menu; do not start a second server on the same port. If the launcher was restarted, reopen the current development QR code so the API address and temporary token match.
+## Run the current app
 
-1. Open Align, start a scan, and choose voice coaching.
-2. Place the rear camera at hip height with the whole body visible. Continue from setup.
-3. Start the scan. Follow front, right, back, left instructions. The counter and small thumbnail reflect actual retained camera images. A missed image holds the current phase. The four labels are instructed views, not automatic body-orientation detection.
-4. Tap the microphone, ask a short question, then tap again to send (automatic send after 15 seconds). Scanning pauses during the question. Allow about 10–30 seconds for the provider. OMNI speech plays when returned; the answer remains readable in captions.
-5. After the four views finish, record a goal such as “I feel stiff after working at my desk; what can I try?” The final request includes all four retained photos, even if an earlier live upload failed. The API runs pose on those JPEGs (and any live samples already uploaded) before OMNI answers.
-6. Recap should show projected pose measurements when landmarks were confident, or an honest empty state if they were not. Review observations, actions, limitations, and cited sources. Save the session, open it from Home, then delete it if you are cleaning up.
+Use `npm run iphone` for Expo Go, or `npm run iphone:dev` for an installed development client. Keep the Mac and iPhone on the same Wi-Fi. Reload the app from Expo's menu after pulling changes. Do not stop an existing development server owned by someone else.
 
-The camera preview is live; Align is sampling stills from that feed, not drawing joints on it. Computer vision (MoveNet) runs on the coaching server against those photos. Local-only mode keeps photos on the phone and therefore shows no angles. The app does not diagnose conditions or infer the cause of pain from appearance.
+The local demo configuration uses the sponsored `qwen3.5-omni-flash` model. The live API's `/v1/health` response should show that model and `nativeAudioExpected: true`. The local `.env` and sponsored usage ledger must remain uncommitted.
 
-## Verification
+## Two-minute presentation path
 
-- `npm test`
-- `npm run build`
-- `npm run omni:smoke` sends the repository preview image and generated test speech to the configured YibuAPI provider. On macOS it checks M4A voice input, verifies the returned WAV container with the native decoder, and checks four-view guidance. It does not validate real body-analysis accuracy. Sponsored calls append `artifacts/yibu_api_calls.jsonl` (gitignored) for the usage report.
+1. Choose the cloud coach option. Position the phone upright at hip height; include the person's head and feet with good lighting.
+2. Start the scan. Follow Front → Right → Back → Left. The small figure is an angle reference, not a box to fit inside.
+3. For a predictable operator-assisted demo, turn **Auto off**. Have the operator confirm each named angle, then tap **Capture … view**. Auto is optional and requires repeated recent pose checks; it will not capture from a stalled check.
+4. Tap **Analyze posture** after the fourth photo. No microphone recording is needed to obtain measured findings. If analysis fails, the photos remain and this action can be retried.
+5. Review the projected measurements and real photos. Save the session if desired.
 
-The provider streams 24 kHz mono PCM; the API wraps it in a WAV container before iPhone playback. See [Qwen-Omni audio documentation](https://www.alibabacloud.com/help/en/model-studio/qwen-omni).
+To demonstrate multimodal voice, use **Ask coach** during capture, or **Add a question** after all four views. Tap once, speak a short question, then tap **Send question**. Recording sends automatically at 15 seconds. Captions appear with the response; **Replay coach** is available only when actual OMNI audio was returned. Final-report audio plays on the recap screen.
+
+## Honest limits
+
+- Auto checks framing, front-versus-profile geometry, and stillness. It does not reliably distinguish front from back, or left from right. Follow the named view and verify the photos.
+- Local-only mode captures photos without uploading or measuring them; it uses manual capture.
+- Measurements come from the existing metric engine applied to MoveNet landmarks. Sparse or uncertain landmarks can produce limited findings or no result; neither means perfect posture.
+- In the September 20 live test, a short Flash voice turn took about 12 seconds and the four-photo report with speech about 32 seconds. Network/provider latency varies. The Plus model's report hit the 45-second timeout during the same investigation.
+- The backend voice round trip and WAV decoding were verified, as was real-photo pose inference. Rehearse microphone permission, two consecutive recordings, audible playback, and the four physical turns on the actual demo iPhone.

@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState, type Dispatch, type PropsWithChildren, type SetStateAction } from "react";
+import { createContext, useCallback, useContext, useMemo, useState, type Dispatch, type PropsWithChildren, type SetStateAction } from "react";
 import type { GuidanceReport, Measurement, ViewId } from "@align/contracts";
 import type { Captures } from "../lib/captureFlow";
 import { discardCaptures } from "../services/captures";
@@ -28,6 +28,9 @@ export function ScanProvider({ children }: PropsWithChildren) {
   const [coachCaption, setCoachCaption] = useState("");
   const [guidanceReport, setGuidanceReport] = useState<GuidanceReport | null>(null);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
+  const setCapture = useCallback((view: ViewId, uri: string) => {
+    setCaptures((current) => ({ ...current, [view]: uri }));
+  }, []);
 
   const value = useMemo<ScanState>(() => ({
     scanId,
@@ -36,7 +39,7 @@ export function ScanProvider({ children }: PropsWithChildren) {
     coachCaption,
     guidanceReport,
     measurements,
-    setCapture: (view, uri) => setCaptures((current) => ({ ...current, [view]: uri })),
+    setCapture,
     setCloudCoachEnabled,
     setCoachCaption,
     setGuidanceReport,
@@ -49,7 +52,7 @@ export function ScanProvider({ children }: PropsWithChildren) {
       setGuidanceReport(null);
       setMeasurements([]);
     },
-  }), [captures, cloudCoachEnabled, coachCaption, guidanceReport, measurements, scanId]);
+  }), [captures, cloudCoachEnabled, coachCaption, guidanceReport, measurements, scanId, setCapture]);
 
   return <ScanContext.Provider value={value}>{children}</ScanContext.Provider>;
 }

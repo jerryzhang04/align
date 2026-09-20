@@ -54,7 +54,8 @@ if (!profile.key) { console.error("\nOMNI_API_KEY is empty in .env. Nothing to t
 const audio = await testWav();
 if (!audio.real) console.log("note    : `say` unavailable, using a tone — checks transport, not comprehension.");
 
-const image = resolve(root, "apps/mobile/align-scan-preview.png");
+const image = process.env.SMOKE_IMAGE ? resolve(process.env.SMOKE_IMAGE) : resolve(root, "apps/mobile/align-scan-preview.png");
+const imageMime = /\.jpe?g$/i.test(image) ? "image/jpeg" : "image/png";
 if (!existsSync(image)) { console.error(`Missing test image: ${image}`); process.exit(1); }
 
 const url = `http://127.0.0.1:${PORT}`;
@@ -77,11 +78,13 @@ try {
   if (converted.status === 0) {
     const turn = new FormData();
     turn.set("meta", JSON.stringify({ requestId: `voice-smoke-${Date.now()}`, scanId: "voice-smoke", stage: "front", measurements: [] }));
-    turn.set("image", new Blob([readFileSync(image)], { type: "image/png" }), "frame.png");
+    turn.set("image", new Blob([readFileSync(image)], { type: imageMime }), imageMime === "image/jpeg" ? "frame.jpg" : "frame.png");
     turn.set("audio", new Blob([readFileSync(m4aPath)], { type: "audio/mp4" }), "question.m4a");
     const response = await fetch(`${url}/v1/coach/turn`, { method: "POST", body: turn });
     const result = await response.json();
     console.log(`voice   : HTTP ${response.status} ${result.error ?? result.text ?? ""} audio=${Boolean(result.audioBase64)}`);
+    console.log(`pose    : ${result.measurements?.length ?? 0} measured findings attached to the voice turn`);
+    if (process.env.SMOKE_REQUIRE_POSE === "true" && !result.measurements?.length) throw new Error("Real-photo voice turn produced no measurements");
     if (result.audioBase64) {
       const bytes = Buffer.from(result.audioBase64, "base64");
       if (bytes.toString("ascii", 0, 4) !== "RIFF" || bytes.toString("ascii", 8, 12) !== "WAVE") throw new Error("Coach returned audio without a WAV container");
@@ -103,9 +106,9 @@ try {
     locale: "en-CA",
   }));
   for (const view of ["front", "right", "back", "left"]) {
-    form.set(view, new Blob([readFileSync(image)], { type: "image/png" }), `${view}.png`);
+    form.set(view, new Blob([readFileSync(image)], { type: imageMime }), `${view}.${imageMime === "image/jpeg" ? "jpg" : "png"}`);
   }
-  form.set("audio", new Blob([readFileSync(audio.path)], { type: "audio/wav" }), "question.wav");
+  if (process.env.SMOKE_PHOTO_ONLY !== "true") form.set("audio", new Blob([readFileSync(audio.path)], { type: "audio/wav" }), "question.wav");
 
   const t0 = Date.now();
   const res = await fetch(`${url}/v1/guidance/report`, { method: "POST", body: form });
@@ -118,6 +121,7 @@ try {
     if (why) console.error(`      provider said: ${why[1]}`);
     exitCode = 1;
   } else {
+    if (process.env.SMOKE_REQUIRE_OMNI === "true" && body.providerMode !== "omni") throw new Error("Report fell back instead of using OMNI");
     console.log(`PASS  HTTP 200  ${ms}ms`);
     console.log(`  summary        : ${(body.summary ?? "").replace(/\s+/g, " ").slice(0, 200)}`);
     console.log(`  provider mode  : ${body.providerMode}`);
@@ -125,7 +129,11 @@ try {
     console.log(`  sources        : ${(body.sources ?? []).map((source) => source.id).join(", ") || "none"}`);
     console.log(`  speechProvider : ${body.speechProvider}`);
     console.log(`  audio          : ${body.audioBase64 ? `${body.audioBase64.length} b64 chars` : "none (captions only)"}`);
-    if (body.degraded) console.log("  degraded       : audio was requested and the provider did not return it");
+    if (body.degraded) {
+      console.log("  degraded       : report used a fallback or captions only");
+      const codes = serverLog.split("\n").filter((line) => /guidance_fallback_local|guidance_speech_unavailable/.test(line));
+      for (const line of codes) console.log(`  diagnostic     : ${line}`);
+    }
   }
 } catch (error) {
   console.error(`FAIL  ${error.message}`);

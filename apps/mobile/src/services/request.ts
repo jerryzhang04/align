@@ -37,6 +37,8 @@ export function coachErrorMessage(error: unknown) {
   if (code === "rate_limited") return "The coach is receiving too many requests. Wait a minute, then try again.";
   if (code === "invalid_image") return "The camera image is too large to send. Return to setup and try the scan again.";
   if (code === "invalid_audio" || code === "missing_recording") return "The recording could not be read. Record a short question and try again.";
+  if (code === "camera_busy" || code === "camera_unavailable") return "The camera was not ready to attach a photo. Hold the phone still, then record your question again.";
+  if (code === "pose_failed") return "Posture analysis is unavailable. Keep the API running, then tap Analyze posture to retry. Your photos are safe.";
   if (code === "guidance_invalid" || code === "coach_invalid_response") return "The coach response could not be verified. Your photos are safe; try describing your goal again.";
   if (code === "omni_failed" || code === "guidance_failed") return "The coaching provider could not respond. Your photos are safe; try again shortly.";
   if (code === "coach_loopback_url") return "This iPhone cannot reach 127.0.0.1. Start Align with npm run iphone so the API URL is your computer’s Wi-Fi address, then reload.";

@@ -56,6 +56,11 @@ export function resolveCoachApiUrl(input: {
   const envUrl = (input.envUrl ?? "").trim().replace(/\/$/, "");
   const token = (input.envToken ?? "").trim();
   const envHost = envUrl ? hostnameFromHint(envUrl) : null;
+  // Keep deployed/tunnel endpoints intact, including HTTPS and path prefixes.
+  // Only auto-repair local development addresses using Metro's LAN host.
+  if (envHost && !isLoopbackHost(envHost) && !ipv4Octets(envHost)) {
+    return { baseUrl: envUrl, token, host: envHost, loopback: false };
+  }
   const expoHost = (input.hostHints ?? [])
     .map(hostnameFromHint)
     .find((host): host is string => typeof host === "string" && host.length > 0 && !isLoopbackHost(host));

@@ -11,7 +11,7 @@ export function MeasurementList({ measurements, localOnly = false }: { measureme
         <Text style={styles.truthBody}>
           {localOnly
             ? "Pose measurement runs on the coaching server from your photos. Local-only mode kept those photos on this iPhone, so no projected angles are available."
-            : "No pose landmarks were confident enough to report a projected angle. Capture completeness is not posture quality."}
+            : "No usable posture measurements were returned. Retake with your whole body in frame, brighter lighting, and the correct view at each step."}
         </Text>
       </View>
     );
@@ -19,13 +19,15 @@ export function MeasurementList({ measurements, localOnly = false }: { measureme
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.heading}>Projected pose measurements</Text>
-      <Text style={styles.lead}>These come from MoveNet landmarks on your photos, then Align’s geometry — not from OMNI guessing degrees.</Text>
+      <Text style={styles.heading}>Measured from your photos</Text>
+      <Text style={styles.lead}>Projected angles from visible body landmarks. Camera position and clothing affect these estimates.</Text>
       {measurements.map((item) => (
         <View key={`${item.view}-${item.id}`} style={styles.card}>
-          <Text style={styles.title}>{measurementLabel(item.id)} · {item.view}</Text>
-          <Text style={styles.value}>{formatMeasurement(item)}</Text>
-          <Text style={item.quality === "usable" ? styles.ok : styles.warn}>{item.quality} · {item.sampleCount} sample{item.sampleCount === 1 ? "" : "s"}</Text>
+          <View style={styles.row}>
+            <Text style={styles.title}>{measurementLabel(item.id)}</Text>
+            <Text style={styles.value}>{formatMeasurement(item)}</Text>
+          </View>
+          <Text style={item.quality === "usable" ? styles.ok : styles.warn}>{item.view} view · {item.quality === "usable" ? "Measured" : "Limited confidence"}</Text>
           <Text style={styles.limit}>{item.limitations.join(" ")}</Text>
         </View>
       ))}
@@ -37,9 +39,10 @@ const styles = StyleSheet.create({
   wrap: { gap: spacing.sm },
   heading: { color: colors.ink, fontSize: 17, fontWeight: "800" },
   lead: { color: colors.muted, fontSize: 14, lineHeight: 20 },
-  card: { backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md, gap: 4, borderWidth: 1, borderColor: colors.line },
-  title: { color: colors.ink, fontSize: 15, fontWeight: "800" },
-  value: { color: colors.ink, fontSize: 28, fontWeight: "700", fontVariant: ["tabular-nums"] },
+  card: { paddingVertical: spacing.md, gap: 6, borderBottomWidth: 1, borderColor: colors.line },
+  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", gap: spacing.md },
+  title: { flex: 1, color: colors.ink, fontSize: 16, fontWeight: "600" },
+  value: { color: colors.ink, fontSize: 22, fontWeight: "600", fontVariant: ["tabular-nums"] },
   ok: { color: colors.tealDark, fontSize: 12, fontWeight: "700" },
   warn: { color: colors.amber, fontSize: 12, fontWeight: "700" },
   limit: { color: colors.muted, fontSize: 12, lineHeight: 18 },

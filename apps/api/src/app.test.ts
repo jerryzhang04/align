@@ -270,6 +270,21 @@ it("keeps valid guidance when the optional speech service fails", async () => {
   expect(await response.json()).toMatchObject({ summary: "Change positions regularly.", speechProvider: "none", degraded: true });
 });
 
+it("retains the measured report when optional speech times out", async () => {
+  const app = api({
+    provider: () => ({ ...provider, nativeAudioExpected: true }),
+    analyze: async () => ({ summary: "Change positions regularly.", observations: [], actions: [], limitations: [], safetySignalIds: [] }),
+    speak: async (_text, _config, signal) => {
+      Object.defineProperty(signal, "aborted", { value: true });
+      Object.defineProperty(signal, "reason", { value: new DOMException("Timed out", "TimeoutError") });
+      throw signal.reason;
+    },
+  });
+  const response = await app.request("/v1/guidance/report", { method: "POST", body: validForm() });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ summary: "Change positions regularly.", speechProvider: "none", degraded: true });
+});
+
 it("releases buffered live photos after a report made from retained local images", async () => {
   const app = api({
     provider: () => provider,
@@ -284,4 +299,20 @@ it("releases buffered live photos after a report made from retained local images
   const leftover = await app.request("/v1/live/sessions/s1/finalize", { method: "POST", body: liveFinalizeForm() });
   expect(leftover.status).toBe(400);
   expect(await leftover.json()).toMatchObject({ error: "missing_live_frames" });
+});
+
+it("analyzes four photos without requiring a spoken question", async () => {
+  let called = false;
+  const app = api({ provider: () => provider, analyze: async (input) => {
+    called = true;
+    expect(input.audioBase64).toBe("");
+    expect(input.images).toHaveLength(4);
+    return { summary: "Individual photo review.", observations: [], actions: [], limitations: [], safetySignalIds: [] };
+  }, speak: async () => ({}) });
+  const form = validForm();
+  form.delete("audio");
+  const response = await app.request("/v1/guidance/report", { method: "POST", body: form });
+  expect(response.status).toBe(200);
+  expect(called).toBe(true);
+  expect((await response.json()).providerMode).toBe("omni");
 });

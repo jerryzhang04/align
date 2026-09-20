@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
+import { AccessibilityInfo, ActivityIndicator, Alert, AppState, StyleSheet, Switch, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import {
@@ -11,12 +11,13 @@ import {
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { SymbolView } from "expo-symbols";
+import { StatusBar } from "expo-status-bar";
 import type { ViewId } from "@align/contracts";
 import { BodyGuide } from "../src/components/BodyGuide";
 import { PrimaryButton } from "../src/components/PrimaryButton";
 import { ProgressRail } from "../src/components/ProgressRail";
 import { createLiveFrameSampler } from "../src/lib/liveFrameSampler";
-import { holdReadyToCapture, LOCAL_FILL_MS, PREVIEW_INTERVAL_MS, scanActionLabel, scanHint, scanInstruction, scanPhaseLabel, tickHoldFill, VIEW_FILL_MS, VIEW_LOCK_MS } from "../src/lib/liveScanFlow";
+import { holdReadyToCapture, PREVIEW_INTERVAL_MS, scanHint, scanInstruction, scanPhaseLabel, VIEW_LOCK_MS } from "../src/lib/liveScanFlow";
 import { OMNI_RECORDING } from "../src/lib/omniRecording";
 import { playCachedCoachAudio, prepareCoachPlayback } from "../src/lib/coachPlayback";
 import { advanceCapture } from "../src/lib/captureFlow";
@@ -27,12 +28,13 @@ import { mergeMeasurements } from "../src/lib/measurementCopy";
 import { localWellnessReport } from "../src/lib/localGuidance";
 import { permissionDeniedMessage, recordingErrorMessage } from "../src/lib/recordingError";
 import { coachErrorMessage } from "../src/services/request";
-import { askCoach, previewStance, requestGuidance, requestPoseMeasurements } from "../src/services/coach";
+import { askCoach, previewStance, requestGuidance } from "../src/services/coach";
 import { discardCaptures, discardLocalFiles, persistCapture } from "../src/services/captures";
 import { resetLiveSession, uploadLiveFrame } from "../src/services/liveCoach";
 import { useScan } from "../src/state/ScanContext";
 import { colors, radius, spacing } from "../src/theme";
 import { pauseAudioSafely } from "../src/lib/audioLifecycle";
+import { createPreviewGate } from "../src/lib/previewGate";
 
 const MAX_VOICE_RECORDING_MS = 15_000;
 
@@ -55,6 +57,10 @@ export default function ScanScreen() {
   const alignedRef = useRef(false);
   const stillRef = useRef(true);
   const previewBusyRef = useRef(false);
+  const previewGate = useRef(createPreviewGate()).current;
+  const manualCaptureRequested = useRef(false);
+  const autoCaptureRef = useRef(true);
+  const foregroundRef = useRef(true);
   const lastPreviewAt = useRef(0);
   const voiceActivityRef = useRef(false);
   const mounted = useRef(true);
@@ -80,11 +86,36 @@ export default function ScanScreen() {
   const [captureError, setCaptureError] = useState("");
   const [awaitingGuidance, setAwaitingGuidance] = useState(false);
   const [measuring, setMeasuring] = useState(false);
+  const [autoCapture, setAutoCapture] = useState(cloudCoachEnabled);
+  const [voiceStatus, setVoiceStatus] = useState("");
   const recorder = useAudioRecorder(OMNI_RECORDING);
   const player = useAudioPlayer(null);
   const active = activeView;
   voiceActivityRef.current = preparingRecording || recording || coachBusy;
   activeViewRef.current = activeView;
+  autoCaptureRef.current = autoCapture;
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      foregroundRef.current = state === "active";
+      previewGate.reset();
+      holdFillRef.current = 0;
+      manualCaptureRequested.current = false;
+      lastTickRef.current = Date.now();
+      if (state !== "active" && recorderActive.current) {
+        recorderActive.current = false;
+        if (recordingTimer.current) clearTimeout(recordingTimer.current);
+        recordingTimer.current = null;
+        setRecording(false);
+        setVoiceStatus("");
+        setError("Recording paused when you left the app. Return and record your question again.");
+        void recorder.stop().then(() => discardLocalFiles(recorder.uri)).catch(() => undefined);
+        void prepareCoachPlayback().catch(() => undefined);
+        livePausedAt.current = null;
+      }
+    });
+    return () => subscription.remove();
+  }, [previewGate, recorder]);
 
   useEffect(() => {
     const sub = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
@@ -93,6 +124,12 @@ export default function ScanScreen() {
   }, []);
 
   const takeCameraPhoto = async (quality: number) => {
+    // A pose preview may already own the camera when the user taps Send.
+    const deadline = Date.now() + 3_000;
+    while (cameraBusy.current && mounted.current && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    if (!mounted.current || !foregroundRef.current) throw new Error("camera_unavailable");
     if (!camera.current || cameraBusy.current) throw new Error("camera_busy");
     cameraBusy.current = true;
     try {
@@ -202,6 +239,8 @@ export default function ScanScreen() {
           return;
         }
         activeViewRef.current = next;
+        previewGate.reset();
+        manualCaptureRequested.current = false;
         holdFillRef.current = 0;
         alignedRef.current = !cloudCoachEnabled;
         stillRef.current = true;
@@ -232,13 +271,14 @@ export default function ScanScreen() {
     };
 
     const runPreview = async (view: ViewId) => {
-      if (!cloudCoachEnabled || cancelled || previewBusyRef.current || cameraBusy.current || capturingRef.current) return;
+      if (!cloudCoachEnabled || !autoCaptureRef.current || !foregroundRef.current || cancelled || previewBusyRef.current || cameraBusy.current || capturingRef.current) return;
       if (!camera.current || voiceActivityRef.current || viewLockedRef.current) return;
       previewBusyRef.current = true;
       lastPreviewAt.current = Date.now();
       let previewUri: string | undefined;
+      const sampledAt = Date.now();
       try {
-        const photo = await takeCameraPhoto(0.18);
+        const photo = await takeCameraPhoto(0.4);
         previewUri = photo.uri;
         if (cancelled || !mounted.current) return;
         const result = await previewStance({
@@ -247,17 +287,19 @@ export default function ScanScreen() {
           view,
           imageUri: photo.uri,
         });
-        if (cancelled || !mounted.current || activeViewRef.current !== view) return;
+        if (cancelled || !mounted.current || activeViewRef.current !== view || !autoCaptureRef.current || voiceActivityRef.current) return;
+        previewGate.observe(view, sampledAt, result.aligned && result.still, Date.now());
         alignedRef.current = result.aligned;
         stillRef.current = result.still;
         setAligned(result.aligned);
-        setStanceHint(result.issues[0]?.message ?? (result.aligned ? "Hold still." : "Match the outline."));
+        setStanceHint(result.issues[0]?.message ?? (result.aligned ? "Body found. Hold still while the checks complete." : "Keep your whole body in view."));
       } catch {
+        previewGate.reset();
         if (mounted.current && !cancelled) {
           alignedRef.current = false;
           stillRef.current = false;
           setAligned(false);
-          setStanceHint("Looking for a full-body match in the outline…");
+          setStanceHint("Pose check unavailable. Turn off Auto and capture each view when ready.");
         }
       } finally {
         previewBusyRef.current = false;
@@ -268,9 +310,8 @@ export default function ScanScreen() {
     const tick = () => {
       if (cancelled) return;
       const now = Date.now();
-      const paused = livePausedAt.current !== null || voiceActivityRef.current || viewLockedRef.current || capturingRef.current;
+      const paused = !foregroundRef.current || livePausedAt.current !== null || voiceActivityRef.current || viewLockedRef.current || capturingRef.current;
       const view = activeViewRef.current;
-      const dt = now - lastTickRef.current;
       lastTickRef.current = now;
       if (localViewsRef.current.has(view) && !viewLockedRef.current && !cameraBusy.current && !liveSampler.isInFlight()) {
         const next = advanceCapture(view);
@@ -279,6 +320,8 @@ export default function ScanScreen() {
           return;
         }
         activeViewRef.current = next;
+        previewGate.reset();
+        manualCaptureRequested.current = false;
         holdFillRef.current = 0;
         alignedRef.current = !cloudCoachEnabled;
         stillRef.current = true;
@@ -292,16 +335,16 @@ export default function ScanScreen() {
         }
         return;
       }
-      const canFill = cloudCoachEnabled ? alignedRef.current && stillRef.current : true;
+      const canFill = cloudCoachEnabled && autoCaptureRef.current && previewGate.ready(view, now);
       if (!paused) {
-        holdFillRef.current = tickHoldFill(holdFillRef.current, dt, canFill, cloudCoachEnabled ? VIEW_FILL_MS : LOCAL_FILL_MS);
+        holdFillRef.current = autoCaptureRef.current ? previewGate.progress(view, now) : 0;
       }
       const fill = holdFillRef.current;
       if (mounted.current) setHoldFillAmount(viewLockedRef.current ? 1 : fill);
-      if (!paused && cloudCoachEnabled && fill < 1 && now - lastPreviewAt.current >= PREVIEW_INTERVAL_MS) {
+      if (!paused && !canFill && !manualCaptureRequested.current && cloudCoachEnabled && autoCaptureRef.current && now - lastPreviewAt.current >= PREVIEW_INTERVAL_MS) {
         void runPreview(view);
       }
-      if (holdReadyToCapture(fill, localViewsRef.current.has(view), canFill)) {
+      if (!paused && (holdReadyToCapture(fill, localViewsRef.current.has(view), canFill) || manualCaptureRequested.current)) {
         void captureView(view);
       }
     };
@@ -312,12 +355,14 @@ export default function ScanScreen() {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [captureGate, cloudCoachEnabled, liveComplete, liveSampler, liveStarted, reduceMotion, scanId, setCapture]);
+  }, [captureGate, cloudCoachEnabled, liveComplete, liveSampler, liveStarted, reduceMotion, scanId, setCapture, previewGate]);
 
   const startLiveScan = () => {
     if (!cameraReady || !camera.current || cameraBusy.current || liveStarted) return;
     captureGate.cancel();
     liveSampler.reset();
+    previewGate.reset();
+    manualCaptureRequested.current = false;
     holdFillRef.current = 0;
     lastTickRef.current = Date.now();
     livePausedAt.current = null;
@@ -341,14 +386,20 @@ export default function ScanScreen() {
   };
 
   const startQuestion = async () => {
-    if (!cloudCoachEnabled || coachBusy || preparingRecording || recording || cameraBusy.current) return;
+    if (!cloudCoachEnabled || coachBusy || preparingRecording || recording || capturingRef.current) return;
     const operation = questionGate.begin();
     if (liveStarted) pauseLiveClock();
     voiceActivityRef.current = true;
     setPreparingRecording(true);
     try {
       setError("");
+      setVoiceStatus("");
+      previewGate.reset();
+      holdFillRef.current = 0;
       pauseAudioSafely(player);
+      const previousAudio = coachAudioFile.current;
+      coachAudioFile.current = null;
+      await discardLocalFiles(previousAudio);
       const microphone = await requestRecordingPermissionsAsync();
       if (!mounted.current || !questionGate.isActive(operation)) return;
       if (!microphone.granted) {
@@ -361,7 +412,8 @@ export default function ScanScreen() {
         await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
         return;
       }
-      await recorder.prepareToRecordAsync();
+      // Recreate the file for each turn; the previous recording was deleted.
+      await recorder.prepareToRecordAsync(OMNI_RECORDING);
       if (!mounted.current || !questionGate.isActive(operation)) {
         await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
         await discardLocalFiles(recorder.uri);
@@ -370,6 +422,7 @@ export default function ScanScreen() {
       recorder.record();
       recorderActive.current = true;
       setRecording(true);
+      setVoiceStatus("Listening · tap Send when you finish (15 seconds maximum)");
       recordingTimer.current = setTimeout(() => {
         recordingTimer.current = null;
         void finishQuestion();
@@ -395,6 +448,8 @@ export default function ScanScreen() {
     recorderActive.current = false;
     setRecording(false);
     setCoachBusy(true);
+    voiceActivityRef.current = true;
+    setVoiceStatus("Sending your question…");
     let audioUri: string | null = null;
     let frameUri: string | null = null;
     try {
@@ -438,20 +493,25 @@ export default function ScanScreen() {
         responseAudio = response.audioBase64;
         responseMime = response.audioMime;
       }
-      if (responseAudio) {
+      // Recap owns final-report playback. Starting here then navigating would
+      // release this player in the middle of its first words.
+      if (responseAudio && !awaitingGuidance) {
         try {
           const audioFile = cacheCoachAudio(responseAudio, responseMime ?? "audio/wav");
           await discardLocalFiles(coachAudioFile.current);
           coachAudioFile.current = audioFile;
           await playCachedCoachAudio(player, audioFile);
+          setVoiceStatus("Coach audio ready · replay below");
         } catch {
           setError("Audio playback is unavailable. Your coach’s answer is shown above.");
         }
       }
+      if (!responseAudio) setVoiceStatus("This reply has captions only. OMNI did not return audio.");
       if (awaitingGuidance) router.replace("/recap");
     } catch (caught) {
       if (!mounted.current) return;
       setError(coachErrorMessage(caught));
+      setVoiceStatus("");
     } finally {
       resumeLiveClock();
       await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => undefined);
@@ -483,7 +543,13 @@ export default function ScanScreen() {
     }
     pauseAudioSafely(player);
     await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => undefined);
-    await resetLiveSession(scanId).catch(() => undefined);
+    const stopController = new AbortController();
+    const stopTimeout = setTimeout(() => stopController.abort(), 2_500);
+    try {
+      await resetLiveSession(scanId, stopController.signal).catch(() => undefined);
+    } finally {
+      clearTimeout(stopTimeout);
+    }
     await discardLocalFiles(recorder.uri, coachAudioFile.current);
     await discardCaptures(captures);
     reset();
@@ -503,27 +569,32 @@ export default function ScanScreen() {
 
   const skipGuidance = async () => {
     setMeasuring(true);
+    setError("");
     try {
       let nextMeasurements = measurements;
       if (cloudCoachEnabled && captures.front && captures.right && captures.back && captures.left) {
         const measureController = new AbortController();
-        const measureTimeout = setTimeout(() => measureController.abort(), 40_000);
+        const measureTimeout = setTimeout(() => measureController.abort(), 65_000);
         try {
-          const pose = await requestPoseMeasurements({
-            requestId: `measure-${Date.now()}`,
+          const report = await requestGuidance({
+            requestId: `analysis-${Date.now()}`,
             scanId,
             captures,
             signal: measureController.signal,
           });
-          nextMeasurements = mergeMeasurements(nextMeasurements, pose.measurements);
-          if (mounted.current) setMeasurements(nextMeasurements);
-        } catch {
-          // Recap still opens; empty measurements stay honest if pose is unavailable.
+          nextMeasurements = report.measurements ?? [];
+          if (mounted.current) {
+            setMeasurements(nextMeasurements);
+            setGuidanceReport(report);
+          }
+        } catch (caught) {
+          if (mounted.current) setError(coachErrorMessage(caught));
+          return;
         } finally {
           clearTimeout(measureTimeout);
         }
       }
-      if (mounted.current && !guidanceReport) {
+      if (mounted.current && !cloudCoachEnabled && !guidanceReport) {
         setGuidanceReport(localWellnessReport({
           requestId: `local-${Date.now()}`,
           measurements: nextMeasurements,
@@ -538,11 +609,9 @@ export default function ScanScreen() {
       } finally {
         clearTimeout(timeout);
       }
+      if (mounted.current) router.replace("/recap");
     } finally {
-      if (mounted.current) {
-        setMeasuring(false);
-        router.replace("/recap");
-      }
+      if (mounted.current) setMeasuring(false);
     }
   };
 
@@ -552,6 +621,7 @@ export default function ScanScreen() {
 
   return (
     <View style={styles.page}>
+      <StatusBar style="light" />
       <CameraView ref={camera} style={StyleSheet.absoluteFill} facing="back" mode="picture" mute pictureSize={pictureSize} animateShutter={false} onMountError={() => setError("Camera could not start. Return to setup and check camera access.")} onCameraReady={async () => {
         const sizes = await camera.current?.getAvailablePictureSizesAsync().catch(() => []);
         const bounded = sizes?.filter((size) => { const [w, h] = size.split("x").map(Number); return w! * h! <= 1_500_000; });
@@ -568,43 +638,49 @@ export default function ScanScreen() {
 
       <SafeAreaView style={styles.safe}>
         <View style={styles.topBar}>
-          <PrimaryButton label="Stop" variant="ghost" onPress={confirmStop} style={styles.stopButton} />
+          <PrimaryButton label="Stop" onPress={confirmStop} style={styles.stopButton} />
           <View style={styles.liveBadge}><View style={styles.liveDot} /><Text style={styles.liveText}>{viewLocked ? "SAVED" : liveStarted ? (aligned || !cloudCoachEnabled ? "HOLD STILL" : "LINE UP") : "LINE UP"}</Text></View>
           <View style={styles.stopSpacer} />
         </View>
         <ProgressRail active={active} captures={captures} />
 
         <View style={styles.instructionCard}>
-          <Text style={styles.viewLabel}>{scanPhaseLabel(active, liveStarted, awaitingGuidance)}</Text>
-          <Text style={styles.instruction}>{awaitingGuidance ? "Tap the microphone, describe what feels uncomfortable or what you want help with, then tap again to send." : scanInstruction(active, liveStarted, liveStarted ? stanceHint : "")}</Text>
+          <Text style={styles.viewLabel}>{awaitingGuidance ? "SCAN COMPLETE" : liveStarted ? scanPhaseLabel(active, true, false) : "FULL-BODY SCAN"}</Text>
+          <Text style={styles.instruction}>{awaitingGuidance ? "Your four photos are ready. Analyze them now, or add a spoken question for the coach." : scanInstruction(active, liveStarted, liveStarted && autoCapture ? stanceHint : "")}</Text>
         </View>
 
         <View style={styles.bottomPanel}>
           {coachCaption ? <View style={styles.caption}><Text style={styles.captionLabel}>COACH</Text><Text style={styles.captionText}>{coachCaption}</Text></View> : null}
           {error || captureError ? <Text accessibilityRole="alert" style={styles.error}>{error || captureError}</Text> : null}
+          {voiceStatus ? <Text accessibilityLiveRegion="polite" style={styles.hint}>{voiceStatus}</Text> : null}
+          {coachAudioFile.current && !recording && !coachBusy && !awaitingGuidance ? <PrimaryButton label="Replay coach" variant="secondary" onPress={() => { void playCachedCoachAudio(player, coachAudioFile.current!).catch(() => setError("Could not play audio. Read the coach caption above.")); }} /> : null}
+          {!awaitingGuidance && cloudCoachEnabled ? <View style={styles.modeRow}>
+            <Text style={styles.modeText}>{autoCapture ? `Auto · ${Math.round(holdFillAmount * 3)}/3 steady checks` : "Manual · capture when your angle is ready"}</Text>
+            <Switch accessibilityLabel="Automatic capture" value={autoCapture} disabled={busy || recording || coachBusy} onValueChange={(enabled) => { autoCaptureRef.current = enabled; setAutoCapture(enabled); previewGate.reset(); holdFillRef.current = 0; manualCaptureRequested.current = false; setStanceHint(""); }} />
+          </View> : null}
           <View style={styles.actionRow}>
             <View style={styles.coachAction}>
               <PrimaryButton
-                label={recording ? "Tap to send" : preparingRecording ? "Starting microphone…" : coachBusy ? "Coach is responding…" : awaitingGuidance ? "Tap to describe your goal" : cloudCoachEnabled ? "Tap to ask coach" : "Coach off"}
+                label={recording ? "Send question" : preparingRecording ? "Starting mic…" : coachBusy ? "Waiting for coach…" : awaitingGuidance ? "Add a question" : cloudCoachEnabled ? "Ask coach" : "Coach off"}
                 variant="secondary"
-                disabled={!cloudCoachEnabled || coachBusy || preparingRecording || measuring || cameraBusy.current || (!liveStarted && !liveComplete)}
+                disabled={!cloudCoachEnabled || coachBusy || preparingRecording || measuring || busy || (!liveStarted && !liveComplete)}
                 onPress={handleVoicePress}
                 icon={coachBusy || preparingRecording ? <ActivityIndicator color={colors.tealDark} /> : <SymbolView name={recording ? "waveform" : "mic.fill"} size={19} tintColor={recording ? colors.coral : colors.tealDark} />}
               />
             </View>
             {awaitingGuidance ? (
-              <PrimaryButton label={measuring ? "Measuring…" : "Skip guidance"} variant="secondary" disabled={preparingRecording || recording || coachBusy || measuring} onPress={() => void skipGuidance()} style={styles.captureAction} />
+              <PrimaryButton label={measuring ? "Analyzing photos…" : "Analyze posture"} disabled={preparingRecording || recording || coachBusy || measuring} onPress={() => void skipGuidance()} style={styles.captureAction} />
             ) : (
               <PrimaryButton
-                label={scanActionLabel({ cameraReady, liveStarted, busy, locked: viewLocked, fill: holdFillAmount, aligned: cloudCoachEnabled ? aligned : true })}
-                disabled={!cameraReady || liveStarted || busy || preparingRecording || recording || coachBusy || measuring}
-                onPress={startLiveScan}
+                label={!cameraReady ? "Starting camera…" : !liveStarted ? "Start scan" : busy ? "Saving photo…" : viewLocked ? "Photo saved" : `Capture ${active} now`}
+                disabled={!cameraReady || viewLocked || busy || preparingRecording || recording || coachBusy || measuring}
+                onPress={() => { if (!liveStarted) startLiveScan(); else manualCaptureRequested.current = true; }}
                 style={styles.captureAction}
-                icon={liveStarted ? <ActivityIndicator color={colors.white} /> : <SymbolView name="camera.fill" size={19} tintColor={colors.white} />}
+                icon={busy ? <ActivityIndicator color={colors.white} /> : <SymbolView name="camera.fill" size={19} tintColor={colors.white} />}
               />
             )}
           </View>
-          <Text style={styles.hint}>{scanHint(liveStarted, awaitingGuidance, cloudCoachEnabled)}</Text>
+          <Text style={styles.hint}>{liveStarted && !autoCapture ? "Show your head and both feet. Check the named view before capturing. Manual capture does not verify your angle." : scanHint(liveStarted, awaitingGuidance, cloudCoachEnabled)}</Text>
         </View>
       </SafeAreaView>
     </View>
@@ -618,9 +694,9 @@ const styles = StyleSheet.create({
   blockedTitle: { color: colors.ink, fontSize: 26, fontWeight: "700" },
   scrimTop: { position: "absolute", top: 0, left: 0, right: 0, height: "18%", backgroundColor: "rgba(5,10,8,0.38)" },
   scrimBottom: { position: "absolute", bottom: 0, left: 0, right: 0, height: "24%", backgroundColor: "rgba(5,10,8,0.62)" },
-  bodyGuideWrap: { position: "absolute", top: "28%", bottom: "24%", left: "14%", right: "14%" },
+  bodyGuideWrap: { position: "absolute", top: "29%", height: "43%", width: "60%", left: "20%" },
   topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 52 },
-  stopButton: { minHeight: 44, paddingHorizontal: 0, width: 64 },
+  stopButton: { minHeight: 44, paddingHorizontal: 0, width: 64, backgroundColor: "transparent" },
   stopSpacer: { width: 64 },
   liveBadge: { flexDirection: "row", gap: 7, alignItems: "center", paddingHorizontal: 12, minHeight: 34, borderRadius: radius.pill, backgroundColor: "rgba(10,18,15,0.72)" },
   liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#62D3B6" },
@@ -633,8 +709,10 @@ const styles = StyleSheet.create({
   captionLabel: { color: colors.tealDark, fontSize: 10, fontWeight: "900", letterSpacing: 1.2 },
   captionText: { color: colors.ink, fontSize: 15, lineHeight: 21, fontWeight: "500" },
   error: { color: "#FFD3CE", textAlign: "center", fontSize: 13, lineHeight: 18, fontWeight: "600" },
-  actionRow: { flexDirection: "row", gap: spacing.sm },
-  coachAction: { flex: 1 },
-  captureAction: { flex: 1.18 },
+  modeRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
+  modeText: { flex: 1, color: colors.white, fontSize: 13, fontWeight: "600" },
+  actionRow: { gap: spacing.sm },
+  coachAction: {},
+  captureAction: {},
   hint: { color: "#C7CFCC", textAlign: "center", fontSize: 11, lineHeight: 16, paddingHorizontal: spacing.md },
 });

@@ -1,3 +1,4 @@
+import { File } from "expo-file-system";
 import { fetchWithTimeout } from "./request";
 import { runtimeCoachApi } from "./runtimeCoachApi";
 import {
@@ -14,8 +15,8 @@ import {
   type ViewId,
 } from "@align/contracts";
 import type { Captures } from "../lib/captureFlow";
-import { recordingUpload } from "../lib/audioUpload";
 
+// Expo 57 fetch reads File.bytes(); legacy React Native { uri } parts are rejected.
 function connection() {
   return runtimeCoachApi();
 }
@@ -54,9 +55,8 @@ export async function askCoach(input: {
     measurements: [],
     captureNotes: ["Native guided capture."],
   }));
-  form.append("image", { uri: input.imageUri, name: "coach-frame.jpg", type: "image/jpeg" } as unknown as Blob);
-  const audio = recordingUpload(input.audioUri);
-  form.append("audio", { uri: input.audioUri, name: audio.name, type: audio.type } as unknown as Blob);
+  form.append("image", new File(input.imageUri));
+  form.append("audio", new File(input.audioUri));
 
   const response = await fetchWithTimeout(`${baseUrl}/v1/coach/turn`, {
     method: "POST",
@@ -78,7 +78,7 @@ export async function requestGuidance(input: {
   requestId: string;
   scanId: string;
   captures: Captures;
-  audioUri: string;
+  audioUri?: string;
   signal?: AbortSignal;
 }): Promise<GuidanceReport> {
   const { baseUrl, token } = connection();
@@ -94,9 +94,9 @@ export async function requestGuidance(input: {
   for (const view of ["front", "right", "back", "left"] as const) {
     const uri = input.captures[view];
     if (!uri) throw new Error("missing_capture");
-    form.append(view, { uri, name: `${view}.jpg`, type: "image/jpeg" } as unknown as Blob);
+    form.append(view, new File(uri));
   }
-  form.append("audio", { uri: input.audioUri, name: recordingUpload(input.audioUri).name, type: recordingUpload(input.audioUri).type } as unknown as Blob);
+  if (input.audioUri) form.append("audio", new File(input.audioUri));
   const response = await fetchWithTimeout(`${baseUrl}/v1/guidance/report`, {
     method: "POST",
     body: form,
@@ -124,7 +124,7 @@ export async function requestPoseMeasurements(input: {
   for (const view of ["front", "right", "back", "left"] as const) {
     const uri = input.captures[view];
     if (!uri) throw new Error("missing_capture");
-    form.append(view, { uri, name: `${view}.jpg`, type: "image/jpeg" } as unknown as Blob);
+    form.append(view, new File(uri));
   }
   const response = await fetchWithTimeout(`${baseUrl}/v1/pose/measure`, {
     method: "POST",
@@ -151,7 +151,7 @@ export async function previewStance(input: {
     scanId: input.scanId,
     view: input.view,
   }));
-  form.append("image", { uri: input.imageUri, name: "preview.jpg", type: "image/jpeg" } as unknown as Blob);
+  form.append("image", new File(input.imageUri));
   const response = await fetchWithTimeout(`${baseUrl}/v1/pose/preview`, {
     method: "POST",
     body: form,

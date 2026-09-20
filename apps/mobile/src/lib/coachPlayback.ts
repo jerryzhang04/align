@@ -22,6 +22,7 @@ export async function playCachedCoachAudio(player: CoachPlayer, uri: string) {
   await Promise.resolve(player.replace(uri));
   if (typeof player.volume === "number") player.volume = 1;
   if (typeof player.muted === "boolean") player.muted = false;
-  await player.seekTo?.(0);
+  // A replaced item already starts at zero. Seeking before AVPlayer loads it
+  // can stall the promise and prevent play() from ever being reached.
   player.play();
 }

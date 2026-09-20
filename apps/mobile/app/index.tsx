@@ -41,7 +41,7 @@ export default function HomeScreen() {
 
   const statusCopy = {
     checking: "Checking coach…",
-    omni: "OMNI multimodal guidance ready",
+    omni: "Voice coach connected",
     unconfigured: "Capture ready · guidance needs setup",
     offline: "Offline capture available",
   }[readiness];
@@ -55,28 +55,11 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.hero}>
-          <Text style={styles.eyebrow}>GUIDED POSTURE CAPTURE</Text>
-          <Text accessibilityRole="header" style={styles.title}>Set the phone down. Step into frame.</Text>
-          <Text style={styles.subtitle}>Match your head and shoulders to the outline. It fills green, takes the photo, then moves to the next view.</Text>
+          <Text accessibilityRole="header" style={styles.title}>See your posture from four views.</Text>
+          <Text style={styles.subtitle}>Take four photos, review measured alignment, and ask the coach a question.</Text>
         </View>
 
-        <View style={styles.previewCard}>
-          <View style={styles.previewTop}>
-            <View style={styles.previewSymbol}>
-              <SymbolView name="viewfinder" size={30} tintColor={colors.tealDark} />
-            </View>
-            <View style={styles.previewCopy}>
-              <Text style={styles.previewTitle}>A steadier scan starts level</Text>
-              <Text style={styles.previewBody}>Your iPhone checks its horizon before it checks your framing.</Text>
-            </View>
-          </View>
-          <View style={styles.levelLine}>
-            <View style={styles.levelTrack}><View style={styles.levelDot} /></View>
-            <Text style={styles.levelText}>±3° setup guide</Text>
-          </View>
-        </View>
-
-        <PrimaryButton label="Start guided scan" onPress={start} />
+        <PrimaryButton label="Start a scan" onPress={start} />
         <View style={styles.statusRow}>
           <View style={[styles.statusDot, readiness === "omni" && styles.statusReady]} />
           <Text style={styles.statusText}>{statusCopy}</Text>
@@ -105,7 +88,7 @@ export default function HomeScreen() {
           </Pressable>
         )) : (
           <View style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>Your first baseline starts here.</Text>
+            <Text style={styles.emptyTitle}>No saved scans yet.</Text>
             <Text style={styles.emptyBody}>Sessions appear after you save a completed four-view capture.</Text>
           </View>
         )}
@@ -121,19 +104,8 @@ const styles = StyleSheet.create({
   mark: { width: 28, height: 28, borderRadius: 8 },
   brand: { color: colors.ink, fontSize: 13, fontWeight: "900", letterSpacing: 2.6 },
   hero: { gap: spacing.sm, paddingTop: spacing.md },
-  eyebrow: { color: colors.tealDark, fontSize: 12, fontWeight: "800", letterSpacing: 1.4 },
-  title: { color: colors.ink, fontSize: 43, lineHeight: 46, letterSpacing: -1.8, fontWeight: "700" },
+  title: { color: colors.ink, fontSize: 34, lineHeight: 39, letterSpacing: -0.8, fontWeight: "700" },
   subtitle: { color: colors.muted, fontSize: 18, lineHeight: 27, maxWidth: 350 },
-  previewCard: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.lg, borderWidth: 1, borderColor: colors.line },
-  previewTop: { flexDirection: "row", alignItems: "flex-start", gap: spacing.md },
-  previewSymbol: { width: 54, height: 54, borderRadius: 18, backgroundColor: colors.tealSoft, alignItems: "center", justifyContent: "center" },
-  previewCopy: { flex: 1, gap: spacing.xs },
-  previewTitle: { color: colors.ink, fontSize: 18, fontWeight: "700", letterSpacing: -0.3 },
-  previewBody: { color: colors.muted, fontSize: 15, lineHeight: 21 },
-  levelLine: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-  levelTrack: { flex: 1, height: 2, backgroundColor: colors.line, alignItems: "center", justifyContent: "center" },
-  levelDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: colors.teal },
-  levelText: { color: colors.muted, fontSize: 12, fontWeight: "700" },
   statusRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, marginTop: -10 },
   statusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.amber },
   statusReady: { backgroundColor: colors.teal },
@@ -147,7 +119,7 @@ const styles = StyleSheet.create({
   sessionCopy: { flex: 1, gap: 3 },
   sessionDate: { color: colors.ink, fontSize: 16, fontWeight: "700" },
   sessionMeta: { color: colors.muted, fontSize: 13 },
-  emptyCard: { borderWidth: 1, borderStyle: "dashed", borderColor: colors.line, borderRadius: radius.md, padding: spacing.lg, gap: spacing.xs },
+  emptyCard: { borderTopWidth: 1, borderColor: colors.line, paddingVertical: spacing.lg, gap: spacing.xs },
   emptyTitle: { color: colors.ink, fontSize: 16, fontWeight: "700" },
   emptyBody: { color: colors.muted, fontSize: 14, lineHeight: 20 },
 });

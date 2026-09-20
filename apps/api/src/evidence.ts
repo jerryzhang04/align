@@ -4,6 +4,22 @@ type EvidenceEntry = EvidenceCitation & { claim: string; caution: string };
 
 export const EVIDENCE_CATALOG: EvidenceEntry[] = [
   {
+    id: "osha-neutral-workstation", title: "Computer Workstations — Good Working Positions",
+    publisher: "Occupational Safety and Health Administration",
+    url: "https://www.osha.gov/etools/computer-workstations/positions",
+    level: "occupational-guidance", reviewedAt: "2026-09-20",
+    claim: "Computer work should allow a comfortably balanced head and neck, relaxed shoulders, supported arms, and changes of position.",
+    caution: "Workstation guidance is qualitative; it does not validate a standing-photo angle cutoff or diagnose an individual.",
+  },
+  {
+    id: "ccohs-standing", title: "Working in a Standing Position — Basic Information",
+    publisher: "Canadian Centre for Occupational Health and Safety",
+    url: "https://www.ccohs.ca/oshanswers/ergonomics/standing/standing_basic.html",
+    level: "occupational-guidance", reviewedAt: "2026-09-20",
+    claim: "Standing work should allow balanced positions, easy reach, frequent changes, and opportunities to sit; avoid prolonged overreaching and work above shoulder height.",
+    caution: "A posed photograph cannot establish working duration or exposure; this source provides no normal knee-angle or alignment-ratio cutoff.",
+  },
+  {
     id: "who-physical-activity-2020",
     title: "WHO guidelines on physical activity and sedentary behaviour",
     publisher: "World Health Organization",

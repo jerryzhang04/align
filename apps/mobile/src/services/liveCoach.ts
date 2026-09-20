@@ -1,3 +1,4 @@
+import { File } from "expo-file-system";
 import { guidanceReportSchema, type GuidanceReport, type Measurement, type ViewId } from "@align/contracts";
 import { runtimeCoachApi } from "./runtimeCoachApi";
 
@@ -52,7 +53,7 @@ export function createLiveCoachClient({ baseUrl, token, fetchImpl = fetch }: Cli
         view: input.view,
         ...(input.orientation ? { orientation: input.orientation } : {}),
       }));
-      form.append("image", { uri: input.imageUri, name: `${input.requestId}.jpg`, type: "image/jpeg" } as unknown as Blob);
+      form.append("image", new File(input.imageUri));
       const response = await fetchImpl(sessionUrl(input.scanId, "frames"), {
         method: "POST",
         body: form,
@@ -72,7 +73,7 @@ export function createLiveCoachClient({ baseUrl, token, fetchImpl = fetch }: Cli
         captureNotes: input.captureNotes ?? [],
         locale: input.locale ?? "en-CA",
       }));
-      form.append("audio", { uri: input.audioUri, name: input.audioUri.toLowerCase().includes(".wav") ? "goal.wav" : "goal.m4a", type: input.audioUri.toLowerCase().includes(".wav") ? "audio/wav" : "audio/mp4" } as unknown as Blob);
+      form.append("audio", new File(input.audioUri));
       const response = await fetchImpl(sessionUrl(input.scanId, "finalize"), {
         method: "POST",
         body: form,

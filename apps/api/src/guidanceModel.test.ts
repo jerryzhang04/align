@@ -83,8 +83,32 @@ describe("guidance model adapter", () => {
     expect(draft.summary).toBe("General review.");
   });
 
+  it("keeps a concise report when OMNI writes one observation for each of four views", () => {
+    const draft = parseModelDraft(JSON.stringify({
+      summary: "Review complete.",
+      observations: ["front", "right", "back", "left"].map((view) => ({ id: view, text: "View recorded.", basedOnViews: [view], limitations: [] })),
+      actions: [], limitations: [], safetySignalIds: ["chest_pain"],
+    }));
+    expect(draft.observations).toHaveLength(3);
+    expect(draft.safetySignalIds).toEqual(["chest_pain"]);
+  });
+
   it("extracts the JSON object from provider reasoning text", () => {
     const payload = JSON.stringify({ summary: "General review.", observations: [], actions: [], limitations: [], safetySignalIds: [] });
     expect(parseModelDraft(`<think>private reasoning</think>\n${payload}`).summary).toBe("General review.");
   });
+});
+
+
+it("omits audio for photo-only analysis and supplies scan-specific references", () => {
+  const request = buildAnalysisRequest({ ...input, audioBase64: "", audioFormat: "" }, {
+    configured: true, mode: "omni", provider: "yibu", model: "qwen3.5-omni-flash",
+    baseUrl: "https://yibuapi.com/v1", apiKey: "key", nativeAudioExpected: false,
+  });
+  const body = JSON.stringify(request);
+  expect(body).not.toContain('"type":"input_audio"');
+  expect(body).toContain("No spoken goal was supplied");
+  expect(body).toContain("No measured findings");
+  expect(body).toContain("osha-neutral-workstation");
+  expect(body).toContain("Do not recycle a default exercise list");
 });

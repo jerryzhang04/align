@@ -19,6 +19,7 @@ export default function RecapScreen() {
   const { scanId, captures, cloudCoachEnabled, coachCaption, guidanceReport, measurements, reset } = useScan();
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [audioError, setAudioError] = useState("");
   const reportAudioFile = useRef<string | null>(null);
   const player = useAudioPlayer(null);
   const progress = captureProgress(captures);
@@ -40,7 +41,7 @@ export default function RecapScreen() {
         reportAudioFile.current = file;
         if (!cancelled) await playCachedCoachAudio(player, file);
       } catch {
-        // Guidance stays readable even if native audio playback is unavailable.
+        if (!cancelled) setAudioError("Audio could not play. Your coach’s answer is available below.");
       }
     })();
     return () => {
@@ -70,9 +71,13 @@ export default function RecapScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-      <View style={styles.successIcon}><SymbolView name="checkmark" size={31} tintColor={colors.white} weight="bold" /></View>
-      <Text accessibilityRole="header" style={styles.title}>Your four views are saved.</Text>
-      <Text style={styles.lead}>{progress.accepted} milestone views retained from the continuous scan. Scores below come from pose landmarks on these photos.</Text>
+      <Text accessibilityRole="header" style={styles.title}>Your posture recap</Text>
+      <Text style={styles.lead}>{progress.accepted} of 4 views captured. Review the photos and measured findings, then save this session.</Text>
+
+      <MeasurementList
+        measurements={measurements.length ? measurements : displayReport.measurements}
+        localOnly={!cloudCoachEnabled}
+      />
 
       <View style={styles.gallery}>
         {CAPTURE_VIEWS.map((view) => (
@@ -83,39 +88,26 @@ export default function RecapScreen() {
         ))}
       </View>
 
-      {displayReport.practiceScores ? (
-        <View style={styles.scoreCard}>
-          <Text style={styles.coachLabel}>CAMERA ALIGNMENT PRACTICE</Text>
-          <Text style={styles.scoreOverall}>{displayReport.practiceScores.overall}/100</Text>
-          <Text style={styles.scoreLead}>Everyday good practice from your four photos — not a clinical grade.</Text>
-          {displayReport.practiceScores.areas.map((area) => (
-            <View key={area.id} style={styles.scoreRow}>
-              <View style={styles.scoreHead}>
-                <Text style={styles.scoreLabel}>{area.label}</Text>
-                <Text style={styles.scoreValue}>{area.score}/100</Text>
-              </View>
-              <View style={styles.scoreTrack}>
-                <View style={[styles.scoreFill, { width: `${area.score}%` }]} />
-              </View>
-              <Text style={styles.guidanceBody}>{area.improve}</Text>
-              <Text style={styles.guidanceRationale}>{area.whyCommon}</Text>
-            </View>
-          ))}
-        </View>
-      ) : null}
-
-      <MeasurementList
-        measurements={measurements.length ? measurements : displayReport.measurements}
-        localOnly={!cloudCoachEnabled}
-      />
-
       <View style={styles.coachCard}>
-        <Text style={styles.coachLabel}>{displayReport.speechProvider === "omni" ? "PERSONALIZED PRACTICE" : "EVERYDAY GOOD PRACTICE"}</Text>
+        <Text style={styles.coachLabel}>{displayReport.providerMode === "omni" ? "Coach’s answer" : "Scan notes"}</Text>
         {displayReport.safety.level !== "wellness" ? <Text style={styles.safetyText}>{displayReport.safety.message}</Text> : null}
+        {displayReport.providerMode !== "omni" ? <Text style={styles.sourceText}>Rule-based scan notes. A personalized OMNI review is not available for this report.</Text> : null}
         <Text style={styles.coachText}>{displayReport.summary}</Text>
+        {displayReport.audioBase64 ? <PrimaryButton label="Replay coach answer" variant="secondary" onPress={() => {
+          setAudioError("");
+          void (async () => {
+            try {
+              const file = reportAudioFile.current ?? cacheCoachAudio(displayReport.audioBase64!, displayReport.audioMime);
+              reportAudioFile.current = file;
+              await playCachedCoachAudio(player, file);
+            } catch {
+              setAudioError("Audio could not play. Read the answer above.");
+            }
+          })();
+        }} /> : <Text style={styles.sourceText}>Caption-only reply · no OMNI audio was returned.</Text>}
+        {audioError ? <Text accessibilityRole="alert" style={styles.safetyText}>{audioError}</Text> : null}
         {displayReport.observations.map((observation) => (
           <View key={observation.id} style={styles.guidanceItem}>
-            <Text style={styles.guidanceTitle}>What was visible</Text>
             <Text style={styles.guidanceBody}>{observation.text}</Text>
           </View>
         ))}
@@ -134,7 +126,7 @@ export default function RecapScreen() {
 
       {coachCaption && !guidanceReport ? (
         <View style={styles.coachCard}>
-          <Text style={styles.coachLabel}>LAST COACH NOTE</Text>
+          <Text style={styles.coachLabel}>Last coach answer</Text>
           <Text style={styles.coachText}>{coachCaption}</Text>
         </View>
       ) : null}
@@ -151,7 +143,6 @@ export default function RecapScreen() {
 
 const styles = StyleSheet.create({
   content: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.lg },
-  successIcon: { width: 64, height: 64, borderRadius: 24, backgroundColor: colors.tealDark, alignItems: "center", justifyContent: "center" },
   title: { color: colors.ink, fontSize: 35, lineHeight: 39, letterSpacing: -1.2, fontWeight: "700" },
   lead: { color: colors.muted, fontSize: 17, lineHeight: 25 },
   gallery: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
@@ -161,17 +152,8 @@ const styles = StyleSheet.create({
   missingText: { color: colors.muted, fontWeight: "700" },
   captureFooter: { minHeight: 44, paddingHorizontal: spacing.md, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   captureLabel: { color: colors.ink, fontSize: 14, fontWeight: "700" },
-  coachCard: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.sm, borderWidth: 1, borderColor: colors.line },
-  scoreCard: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.sm, borderWidth: 1, borderColor: colors.line },
-  scoreOverall: { color: colors.ink, fontSize: 42, fontWeight: "800", fontVariant: ["tabular-nums"] },
-  scoreLead: { color: colors.muted, fontSize: 14, lineHeight: 20 },
-  scoreRow: { gap: 4, paddingTop: spacing.sm },
-  scoreHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" },
-  scoreLabel: { color: colors.ink, fontSize: 15, fontWeight: "800" },
-  scoreValue: { color: colors.tealDark, fontSize: 16, fontWeight: "800", fontVariant: ["tabular-nums"] },
-  scoreTrack: { height: 8, borderRadius: 99, backgroundColor: colors.line, overflow: "hidden" },
-  scoreFill: { height: "100%", borderRadius: 99, backgroundColor: colors.teal },
-  coachLabel: { color: colors.tealDark, fontSize: 11, fontWeight: "900", letterSpacing: 1.1 },
+  coachCard: { paddingVertical: spacing.md, gap: spacing.md, borderTopWidth: 1, borderColor: colors.line },
+  coachLabel: { color: colors.ink, fontSize: 22, fontWeight: "700" },
   coachText: { color: colors.ink, fontSize: 16, lineHeight: 23 },
   safetyText: { color: colors.coral, fontSize: 15, lineHeight: 22, fontWeight: "800" },
   guidanceItem: { gap: 3, paddingTop: spacing.xs },

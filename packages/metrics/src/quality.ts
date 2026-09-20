@@ -81,9 +81,9 @@ function bodySpan(frame: PoseFrame): { height: number; midX: number } | null {
 }
 
 /**
- * Face ID analog: the person must occupy the standing guide (full height, centered,
- * correct facing) before a hold can fill. Pattern matches open-source selfie SDKs
- * that keep progress at 0 until the face is inside the oval, then reset on leave.
+ * Capture-only framing checks. The guide occupies the clear area between controls;
+ * allow a full body there without requiring it to fill most of the camera height.
+ * Landmark confidence and measurement acceptance remain in assessFrame/measureFrame.
  */
 export function fitBodyGuide(frame: PoseFrame, view: ViewId): QualityResult {
   const quality = assessFrame(frame, view);
@@ -92,13 +92,13 @@ export function fitBodyGuide(frame: PoseFrame, view: ViewId): QualityResult {
   if (!span) {
     issues.push({ code: "no_pose", message: "Step into the outline so your whole body is visible." });
   } else {
-    if (span.height < 0.55) {
-      issues.push({ code: "too_far", message: "Step closer until your head and feet fill the outline." });
+    if (span.height < 0.38) {
+      issues.push({ code: "too_far", message: "Step closer so your whole body is easier to see." });
     } else if (span.height > 0.92) {
-      issues.push({ code: "too_close", message: "Step back so hair to shoes fits inside the outline." });
+      issues.push({ code: "too_close", message: "Step back so your head and feet stay inside the camera." });
     }
     if (Math.abs(span.midX - 0.5) > 0.16) {
-      issues.push({ code: "off_center", message: "Shift left or right until you are centered in the outline." });
+      issues.push({ code: "off_center", message: "Move toward the center of the camera." });
     }
   }
   const unique = issues.filter((issue, index) => issues.findIndex((item) => item.code === issue.code) === index);
