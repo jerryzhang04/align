@@ -139,3 +139,32 @@ describe("guidance API", () => {
     expect(await lateFrame.json()).toMatchObject({ error: "live_session_closed" });
   });
 });
+
+
+it("keeps valid guidance when the optional speech service fails", async () => {
+  const app = createApp({
+    provider: () => ({ ...provider, nativeAudioExpected: true }),
+    analyze: async () => ({ summary: "Change positions regularly.", observations: [], actions: [], limitations: [], safetySignalIds: [] }),
+    speak: async () => { throw new Error("speech unavailable"); },
+  });
+  const response = await app.request("/v1/guidance/report", { method: "POST", body: validForm() });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ summary: "Change positions regularly.", speechProvider: "none", degraded: true });
+});
+
+
+it("releases buffered live photos after a report made from retained local images", async () => {
+  const app = createApp({
+    provider: () => provider,
+    analyze: async () => ({ summary: "Review complete.", observations: [], actions: [], limitations: [], safetySignalIds: [] }),
+    speak: async () => ({}),
+  });
+  for (const [index, view] of VIEWS.entries()) {
+    await app.request("/v1/live/sessions/s1/frames", { method: "POST", body: liveFrameForm(`cleanup-${index}`, index * 1000, view) });
+  }
+  const report = await app.request("/v1/guidance/report", { method: "POST", body: validForm() });
+  expect(report.status).toBe(200);
+  const leftover = await app.request("/v1/live/sessions/s1/finalize", { method: "POST", body: liveFinalizeForm() });
+  expect(leftover.status).toBe(400);
+  expect(await leftover.json()).toMatchObject({ error: "missing_live_frames" });
+});

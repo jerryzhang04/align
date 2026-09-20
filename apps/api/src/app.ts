@@ -178,7 +178,11 @@ export function createApp(dependencies: Dependencies = {}) {
         locale: meta.locale,
       }, config, signal);
       const core = validateGuidanceDraft(draft);
-      const voice = await speak(narration(core), config, signal);
+      const voice = await speak(narration(core), config, signal).catch((error) => {
+        if (controller.signal.aborted) throw error;
+        console.warn("guidance_speech_unavailable", meta.requestId);
+        return {} as { audioBase64?: string; audioMime?: string };
+      });
       const report = guidanceReportSchema.parse({
         requestId: meta.requestId,
         ...core,
@@ -261,7 +265,11 @@ export function createApp(dependencies: Dependencies = {}) {
         locale: meta.locale,
       }, config, signal);
       const core = validateGuidanceDraft(draft);
-      const voice = await speak(narration(core), config, signal);
+      const voice = await speak(narration(core), config, signal).catch((error) => {
+        if (controller.signal.aborted) throw error;
+        console.warn("guidance_speech_unavailable", meta.requestId);
+        return {} as { audioBase64?: string; audioMime?: string };
+      });
       const report = guidanceReportSchema.parse({
         requestId: meta.requestId,
         ...core,
@@ -273,6 +281,7 @@ export function createApp(dependencies: Dependencies = {}) {
         degraded: config.nativeAudioExpected && !voice.audioBase64 ? true : undefined,
       });
       console.info("guidance_report", meta.requestId, config.mode, config.model, report.latencyMs, report.speechProvider);
+      liveSessions.close(meta.scanId);
       return c.json(report);
     } catch (error) {
       const name = error instanceof Error ? error.name : "";

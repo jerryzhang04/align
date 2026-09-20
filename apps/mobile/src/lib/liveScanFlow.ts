@@ -20,3 +20,11 @@ export function liveScanPhase(elapsedMs: number) {
     progress: Math.min(1, safeElapsed / LIVE_SCAN_DURATION_MS),
   };
 }
+
+/** Advance at most one phase, and hold until a real image has been retained. */
+export function advanceLiveScan(elapsedMs: number, deltaMs: number, captured: ReadonlySet<ViewId>) {
+  const phase = liveScanPhase(elapsedMs);
+  if (phase.complete) return LIVE_SCAN_DURATION_MS;
+  const boundary = (phase.index + 1) * PHASE_DURATION_MS;
+  return Math.min(elapsedMs + Math.max(0, deltaMs), boundary - (captured.has(phase.view) ? 0 : 1));
+}

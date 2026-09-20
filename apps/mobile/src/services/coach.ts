@@ -1,3 +1,4 @@
+import { fetchWithTimeout } from "./request";
 import {
   coachTurnResponseSchema,
   guidanceReportSchema,
@@ -17,7 +18,7 @@ function headers() {
 }
 
 export async function checkCoachHealth(signal?: AbortSignal): Promise<HealthResponse> {
-  const response = await fetch(`${apiUrl}/v1/health`, { signal, headers: headers() });
+  const response = await fetchWithTimeout(`${apiUrl}/v1/health`, { signal, headers: headers() }, 5_000);
   if (!response.ok) throw new Error("coach_unavailable");
   return healthResponseSchema.parse(await response.json());
 }
@@ -41,7 +42,7 @@ export async function askCoach(input: {
   form.append("image", { uri: input.imageUri, name: "coach-frame.jpg", type: "image/jpeg" } as unknown as Blob);
   form.append("audio", { uri: input.audioUri, name: "question.m4a", type: "audio/mp4" } as unknown as Blob);
 
-  const response = await fetch(`${apiUrl}/v1/coach/turn`, {
+  const response = await fetchWithTimeout(`${apiUrl}/v1/coach/turn`, {
     method: "POST",
     body: form,
     headers: headers(),
@@ -77,7 +78,7 @@ export async function requestGuidance(input: {
     form.append(view, { uri, name: `${view}.jpg`, type: "image/jpeg" } as unknown as Blob);
   }
   form.append("audio", { uri: input.audioUri, name: "goal.m4a", type: "audio/mp4" } as unknown as Blob);
-  const response = await fetch(`${apiUrl}/v1/guidance/report`, {
+  const response = await fetchWithTimeout(`${apiUrl}/v1/guidance/report`, {
     method: "POST",
     body: form,
     headers: headers(),

@@ -26,10 +26,14 @@ export default function RecapScreen() {
 
   useEffect(() => {
     if (!guidanceReport?.audioBase64) return;
-    const file = cacheCoachAudio(guidanceReport.audioBase64, guidanceReport.audioMime);
-    reportAudioFile.current = file;
-    player.replace(file);
-    player.play();
+    try {
+      const file = cacheCoachAudio(guidanceReport.audioBase64, guidanceReport.audioMime);
+      reportAudioFile.current = file;
+      player.replace(file);
+      player.play();
+    } catch {
+      // Guidance stays readable even if native audio playback is unavailable.
+    }
     return () => {
       void discardLocalFiles(reportAudioFile.current);
     };
@@ -71,7 +75,7 @@ export default function RecapScreen() {
 
       <View style={styles.truthCard}>
         <View style={styles.truthHeader}><SymbolView name="ruler" size={22} tintColor={colors.tealDark} /><Text style={styles.truthTitle}>Measurement status</Text></View>
-        <Text style={styles.truthBody}>The iOS capture loop is active. Degree-level findings stay hidden until the native pose pipeline is connected to the shared, tested metric definitions.</Text>
+        <Text style={styles.truthBody}>Your camera photos are shown above. The coach can review visible patterns and your spoken goal. This scan does not measure posture angles or diagnose a condition.</Text>
       </View>
 
       {guidanceReport ? (
@@ -92,6 +96,7 @@ export default function RecapScreen() {
               <Text style={styles.guidanceRationale}>{action.rationale}</Text>
             </View>
           ))}
+          {guidanceReport.limitations.map((limitation) => <Text key={limitation} style={styles.sourceText}>{limitation}</Text>)}
           <Text style={styles.sourceHeading}>Sources used</Text>
           {guidanceReport.sources.map((source) => <Text key={source.id} style={styles.sourceText}>{source.publisher} · {source.title}{"\n"}{source.url}</Text>)}
           <Text style={styles.providerText}>OMNI · {guidanceReport.model}</Text>

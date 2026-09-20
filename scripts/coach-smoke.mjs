@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // End-to-end check of four-view + spoken-goal guidance against the configured provider.
 // Boots its own API on an isolated port so it never collides with `npm run iphone`.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -70,6 +70,29 @@ let exitCode = 0;
 try {
   const health = await waitForHealth(url);
   console.log(`health  : mode=${health.providerMode} configured=${health.guidanceConfigured} model=${health.model}\n`);
+
+  // Match the installed iPhone's AAC/M4A recording, not only a desktop WAV.
+  const m4aPath = join(tmpdir(), "align-smoke.m4a");
+  const converted = spawnSync("afconvert", ["-f", "m4af", "-d", "aac", audio.path, m4aPath]);
+  if (converted.status === 0) {
+    const turn = new FormData();
+    turn.set("meta", JSON.stringify({ requestId: `voice-smoke-${Date.now()}`, scanId: "voice-smoke", stage: "front", measurements: [] }));
+    turn.set("image", new Blob([readFileSync(image)], { type: "image/png" }), "frame.png");
+    turn.set("audio", new Blob([readFileSync(m4aPath)], { type: "audio/mp4" }), "question.m4a");
+    const response = await fetch(`${url}/v1/coach/turn`, { method: "POST", body: turn });
+    const result = await response.json();
+    console.log(`voice   : HTTP ${response.status} ${result.error ?? result.text ?? ""} audio=${Boolean(result.audioBase64)}`);
+    if (result.audioBase64) {
+      const bytes = Buffer.from(result.audioBase64, "base64");
+      if (bytes.toString("ascii", 0, 4) !== "RIFF" || bytes.toString("ascii", 8, 12) !== "WAVE") throw new Error("Coach returned audio without a WAV container");
+      const speechFile = join(tmpdir(), "align-coach-smoke-output.wav");
+      writeFileSync(speechFile, bytes);
+      const info = spawnSync("afinfo", [speechFile], { encoding: "utf8" });
+      if (process.platform === "darwin" && info.status !== 0) throw new Error("macOS could not decode the returned speech");
+      console.log("voice   : native WAV decoder accepted the returned speech");
+    }
+    if (!response.ok) { exitCode = 1; console.error(serverLog.split("\n").filter((line) => line.includes("omni_turn_failed")).join("\n")); }
+  }
 
   const form = new FormData();
   form.set("meta", JSON.stringify({

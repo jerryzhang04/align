@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Linking, StyleSheet, Text, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { DeviceMotion } from "expo-sensors";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { PrimaryButton } from "../src/components/PrimaryButton";
 import { assessHorizon } from "../src/lib/level";
@@ -10,6 +10,8 @@ import { colors, radius, spacing } from "../src/theme";
 
 export default function SetupScreen() {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [focused, setFocused] = useState(false);
+  useFocusEffect(useCallback(() => { setFocused(true); return () => setFocused(false); }, []));
   const [roll, setRoll] = useState<number | null>(null);
   const [sensorReady, setSensorReady] = useState(false);
   const [sensorUnavailable, setSensorUnavailable] = useState(false);
@@ -56,7 +58,7 @@ export default function SetupScreen() {
   return (
     <View style={styles.page}>
       <View style={styles.cameraShell}>
-        <CameraView style={StyleSheet.absoluteFill} facing="back" animateShutter={false} />
+        {focused ? <CameraView style={StyleSheet.absoluteFill} facing="back" animateShutter={false} /> : null}
         <View pointerEvents="none" style={styles.horizon}>
           <View style={[styles.horizonBar, { transform: [{ rotate: `${Math.max(-18, Math.min(18, level.rollDegrees))}deg` }] }]} />
           <View style={styles.centerTick} />

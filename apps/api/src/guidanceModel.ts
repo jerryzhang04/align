@@ -1,3 +1,4 @@
+import { playableOmniAudio } from "./omniAudio.js";
 import { modelGuidanceDraftSchema, type Measurement, type ModelGuidanceDraft, type ViewId } from "@align/contracts";
 import { evidencePromptContext } from "./evidence.js";
 import type { ProviderConfig } from "./provider.js";
@@ -221,5 +222,5 @@ export async function runGuidanceSpeech(narration: string, config: ProviderConfi
   }
   const streamed = await readStream(response);
   audit(config, "validated_guidance_speech", startedAt, response, streamed.usage);
-  return streamed.audioBase64 ? { audioBase64: streamed.audioBase64, audioMime: "audio/wav" } : {};
+  return streamed.audioBase64 ? { audioBase64: playableOmniAudio(streamed.audioBase64), audioMime: "audio/wav" } : {};
 }
