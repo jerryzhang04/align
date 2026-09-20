@@ -1,30 +1,46 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, Image, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
+import { useAudioPlayer } from "expo-audio";
 import { SymbolView } from "expo-symbols";
 import { PrimaryButton } from "../src/components/PrimaryButton";
 import { CAPTURE_VIEWS, captureProgress } from "../src/lib/captureFlow";
-import { finalizeCaptures } from "../src/services/captures";
+import { discardLocalFiles, finalizeCaptures } from "../src/services/captures";
+import { cacheCoachAudio } from "../src/services/audioFile";
 import { saveSession } from "../src/services/history";
 import { useScan } from "../src/state/ScanContext";
 import { colors, radius, spacing } from "../src/theme";
 
 export default function RecapScreen() {
-  const { scanId, captures, coachCaption, reset } = useScan();
+  const { scanId, captures, coachCaption, guidanceReport, reset } = useScan();
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const reportAudioFile = useRef<string | null>(null);
+  const player = useAudioPlayer(null);
   const progress = captureProgress(captures);
 
   useEffect(() => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    if (!guidanceReport?.audioBase64) return;
+    const file = cacheCoachAudio(guidanceReport.audioBase64, guidanceReport.audioMime);
+    reportAudioFile.current = file;
+    player.replace(file);
+    player.play();
+    return () => {
+      player.pause();
+      void discardLocalFiles(reportAudioFile.current);
+    };
+  }, [guidanceReport, player]);
+
   const save = async () => {
     setSaving(true);
     try {
       await finalizeCaptures(scanId, captures, async (persistent) => {
-        await saveSession({ id: scanId, createdAt: new Date().toISOString(), captures: persistent, coachCaption });
+        await saveSession({ id: scanId, createdAt: new Date().toISOString(), captures: persistent, coachCaption, guidanceReport });
       });
       setSaved(true);
     } catch {
@@ -59,7 +75,29 @@ export default function RecapScreen() {
         <Text style={styles.truthBody}>The iOS capture loop is active. Degree-level findings stay hidden until the native pose pipeline is connected to the shared, tested metric definitions.</Text>
       </View>
 
-      {coachCaption ? (
+      {guidanceReport ? (
+        <View style={styles.coachCard}>
+          <Text style={styles.coachLabel}>EVIDENCE-BACKED GUIDANCE</Text>
+          {guidanceReport.safety.level !== "wellness" ? <Text style={styles.safetyText}>{guidanceReport.safety.message}</Text> : null}
+          <Text style={styles.coachText}>{guidanceReport.summary}</Text>
+          {guidanceReport.observations.map((observation) => (
+            <View key={observation.id} style={styles.guidanceItem}>
+              <Text style={styles.guidanceTitle}>What was visible</Text>
+              <Text style={styles.guidanceBody}>{observation.text}</Text>
+            </View>
+          ))}
+          {guidanceReport.actions.map((action) => (
+            <View key={action.id} style={styles.guidanceItem}>
+              <Text style={styles.guidanceTitle}>{action.title}</Text>
+              <Text style={styles.guidanceBody}>{action.instruction}</Text>
+              <Text style={styles.guidanceRationale}>{action.rationale}</Text>
+            </View>
+          ))}
+          <Text style={styles.sourceHeading}>Sources used</Text>
+          {guidanceReport.sources.map((source) => <Text key={source.id} style={styles.sourceText}>{source.publisher} · {source.title}{"\n"}{source.url}</Text>)}
+          <Text style={styles.providerText}>OMNI · {guidanceReport.model}</Text>
+        </View>
+      ) : coachCaption ? (
         <View style={styles.coachCard}>
           <Text style={styles.coachLabel}>LAST COACH NOTE</Text>
           <Text style={styles.coachText}>{coachCaption}</Text>
@@ -95,6 +133,14 @@ const styles = StyleSheet.create({
   coachCard: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.sm, borderWidth: 1, borderColor: colors.line },
   coachLabel: { color: colors.tealDark, fontSize: 11, fontWeight: "900", letterSpacing: 1.1 },
   coachText: { color: colors.ink, fontSize: 16, lineHeight: 23 },
+  safetyText: { color: colors.coral, fontSize: 15, lineHeight: 22, fontWeight: "800" },
+  guidanceItem: { gap: 3, paddingTop: spacing.xs },
+  guidanceTitle: { color: colors.ink, fontSize: 15, fontWeight: "800" },
+  guidanceBody: { color: colors.ink, fontSize: 15, lineHeight: 21 },
+  guidanceRationale: { color: colors.muted, fontSize: 13, lineHeight: 19 },
+  sourceHeading: { color: colors.tealDark, fontSize: 12, fontWeight: "900", letterSpacing: 0.7, marginTop: spacing.sm },
+  sourceText: { color: colors.muted, fontSize: 12, lineHeight: 18 },
+  providerText: { color: colors.muted, fontSize: 11, lineHeight: 16, marginTop: spacing.xs },
   actions: { gap: spacing.sm },
   footnote: { color: colors.muted, fontSize: 12, lineHeight: 18, textAlign: "center", paddingHorizontal: spacing.md },
 });

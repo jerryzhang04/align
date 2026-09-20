@@ -1,4 +1,5 @@
 import { LIMITS } from "./limits.js";
+import { appendAuditRecord } from "./usageLog.js";
 
 export type OmniTurnInput = {
   requestId: string;
@@ -24,7 +25,7 @@ function env(name: string, fallback = ""): string {
 }
 
 export function omniConfigured(): boolean {
-  return Boolean(env("OMNI_API_KEY"));
+  return Boolean(env("OMNI_API_KEY")) && sponsoredCall() && omniModel() === "qwen3.5-omni-plus";
 }
 
 export function omniModel(): string {
@@ -36,12 +37,44 @@ function baseUrl(): string {
 }
 
 /**
- * Whether to request native speech from the model. Providers that cannot emit
- * audio reject `modalities: ["text","audio"]` outright, which costs a wasted
- * round trip before the text fallback. Set OMNI_AUDIO_OUTPUT=false for those.
+ * Whether to request native speech from OMNI. Captions remain available when
+ * a Yibu configuration does not expose audio output.
  */
 export function audioOutputEnabled(): boolean {
   return env("OMNI_AUDIO_OUTPUT", "true").toLowerCase() !== "false";
+}
+
+/** Sponsored YibuAPI credit must be accounted for; other providers must not be
+ * mislabelled as yibuapi in the ledger, so only log calls to that host. */
+function sponsoredCall(): boolean {
+  try {
+    return /(^|\.)yibuapi\.com$/i.test(new URL(baseUrl()).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function logTurn(input: {
+  transport: string;
+  ok: boolean;
+  startedAt: number;
+  responseJson?: Record<string, unknown> | null;
+  statusCode?: number | null;
+  error?: string | null;
+}): void {
+  if (!sponsoredCall()) return;
+  appendAuditRecord({
+    model: omniModel(),
+    apiKey: env("OMNI_API_KEY"),
+    endpoint: `${baseUrl()}/chat/completions`,
+    purpose: env("OMNI_PURPOSE", "posture_coaching"),
+    transport: input.transport,
+    ok: input.ok,
+    latencySeconds: (Date.now() - input.startedAt) / 1000,
+    responseJson: input.responseJson,
+    statusCode: input.statusCode,
+    error: input.error,
+  });
 }
 
 function audioFormat(mime: string): string {
@@ -77,6 +110,18 @@ function userText(input: OmniTurnInput): string {
   ].join("\n");
 }
 
+/**
+ * Providers disagree on how `input_audio.data` is encoded, and getting it wrong
+ * fails the whole request:
+ *   - YibuAPI / Qwen Omni expect a data: URI (matches the organizers' own
+ *     yibu_http.py helper, which sends `data:audio/wav;base64,...`).
+ * The application supports only YibuAPI / Qwen Omni, which expects a data URI.
+ */
+export function encodeAudioData(input: Pick<OmniTurnInput, "audioBase64" | "audioFormat">): string {
+  const format = audioFormat(input.audioFormat);
+  return `data:audio/${format};base64,${input.audioBase64}`;
+}
+
 export function contentParts(input: OmniTurnInput, includeAudio: boolean) {
   const parts: Array<Record<string, unknown>> = [
     {
@@ -88,9 +133,7 @@ export function contentParts(input: OmniTurnInput, includeAudio: boolean) {
     parts.push({
       type: "input_audio",
       input_audio: {
-        // OpenAI-compatible providers expect raw base64 here, NOT a data: URI.
-        // Sending a data: URI makes the provider reject the whole request.
-        data: input.audioBase64,
+        data: encodeAudioData(input),
         format: audioFormat(input.audioFormat),
       },
     });
@@ -99,7 +142,7 @@ export function contentParts(input: OmniTurnInput, includeAudio: boolean) {
   return parts;
 }
 
-async function readSse(response: Response, requestId: string): Promise<{ text: string; audioBase64: string }> {
+async function readSse(response: Response, requestId: string): Promise<{ text: string; audioBase64: string; usage: Record<string, unknown> | null }> {
   if (!response.body) {
     throw new Error("omni_empty_stream");
   }
@@ -108,12 +151,13 @@ async function readSse(response: Response, requestId: string): Promise<{ text: s
   let buffer = "";
   let text = "";
   let audioBase64 = "";
+  let usage: Record<string, unknown> | null = null;
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
-    const chunks = buffer.split("\n\n");
+    const chunks = buffer.split(/\r?\n\r?\n/);
     buffer = chunks.pop() ?? "";
     for (const chunk of chunks) {
       const line = chunk
@@ -124,6 +168,7 @@ async function readSse(response: Response, requestId: string): Promise<{ text: s
       const data = line.slice(5).trim();
       if (data === "[DONE]") continue;
       let parsed: {
+        usage?: Record<string, unknown>;
         choices?: Array<{
           delta?: { content?: string; audio?: { data?: string; transcript?: string } };
           message?: { content?: string };
@@ -134,6 +179,8 @@ async function readSse(response: Response, requestId: string): Promise<{ text: s
       } catch {
         continue;
       }
+      // stream_options.include_usage puts totals on a late chunk; keep the last one.
+      if (parsed.usage && typeof parsed.usage === "object") usage = parsed.usage;
       const delta = parsed.choices?.[0]?.delta;
       const message = parsed.choices?.[0]?.message;
       if (typeof delta?.content === "string") text += delta.content;
@@ -146,7 +193,7 @@ async function readSse(response: Response, requestId: string): Promise<{ text: s
     }
   }
   void requestId;
-  return { text: text.trim(), audioBase64 };
+  return { text: text.trim(), audioBase64, usage };
 }
 
 async function postOmni(body: Record<string, unknown>, signal: AbortSignal): Promise<Response> {
@@ -191,9 +238,17 @@ export async function runOmniTurn(input: OmniTurnInput, signal: AbortSignal): Pr
       max_tokens: 400,
       temperature: 0.4,
     };
+    const streamStartedAt = Date.now();
     const streamingResponse = await postOmni(streamingBody, timeout);
     if (streamingResponse.ok) {
       const streamed = await readSse(streamingResponse, input.requestId);
+      logTurn({
+        transport: "http-sse",
+        ok: true,
+        startedAt: streamStartedAt,
+        responseJson: streamed.usage ? { usage: streamed.usage } : null,
+        statusCode: streamingResponse.status,
+      });
       if (streamed.text || streamed.audioBase64) {
         return {
           text: streamed.text || "I reviewed the frame and measurements.",
@@ -202,6 +257,14 @@ export async function runOmniTurn(input: OmniTurnInput, signal: AbortSignal): Pr
           model,
         };
       }
+    } else {
+      logTurn({
+        transport: "http-sse",
+        ok: false,
+        startedAt: streamStartedAt,
+        statusCode: streamingResponse.status,
+        error: `omni_http_${streamingResponse.status}`,
+      });
     }
   }
 
@@ -212,11 +275,21 @@ export async function runOmniTurn(input: OmniTurnInput, signal: AbortSignal): Pr
     max_tokens: 400,
     temperature: 0.4,
   };
+  const textStartedAt = Date.now();
   const response = await postOmni(textOnlyBody, timeout);
   const payload = (await response.json().catch(() => ({}))) as {
     error?: { message?: string };
+    usage?: Record<string, unknown>;
     choices?: Array<{ message?: { content?: string | Array<{ type?: string; text?: string }> } }>;
   };
+  logTurn({
+    transport: "http",
+    ok: response.ok,
+    startedAt: textStartedAt,
+    responseJson: payload as Record<string, unknown>,
+    statusCode: response.status,
+    error: response.ok ? null : payload.error?.message ?? `omni_http_${response.status}`,
+  });
   if (!response.ok) {
     const error = new Error(payload.error?.message || `omni_http_${response.status}`);
     error.name = "OmniProviderError";

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// End-to-end check of POST /v1/coach/turn against whatever provider .env names.
+// End-to-end check of four-view + spoken-goal guidance against the configured provider.
 // Boots its own API on an isolated port so it never collides with `npm run iphone`.
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -15,7 +15,7 @@ function testWav() {
   const path = join(tmpdir(), "align-smoke.wav");
   if (process.platform === "darwin") {
     const say = spawn("say", ["-o", path, "--data-format=LEI16@16000",
-      "Am I standing up straight? What do you see?"], { stdio: "ignore" });
+      "I feel stiff after working at my desk. What general wellness guidance can you give me from these four views?"], { stdio: "ignore" });
     return new Promise((r) => say.on("exit", (code) => r(code === 0 && existsSync(path) ? { path, real: true } : synth(path))));
   }
   return Promise.resolve(synth(path));
@@ -69,35 +69,37 @@ server.stderr.on("data", (d) => { serverLog += d; });
 let exitCode = 0;
 try {
   const health = await waitForHealth(url);
-  console.log(`health  : configured=${health.omniConfigured} model=${health.model}\n`);
+  console.log(`health  : mode=${health.providerMode} configured=${health.guidanceConfigured} model=${health.model}\n`);
 
   const form = new FormData();
   form.set("meta", JSON.stringify({
-    requestId: `smoke-${Date.now()}`, scanId: "smoke", stage: "capture:front",
-    measurements: [{
-      id: "shoulder_line_tilt", value: 3.4, unit: "deg", view: "front",
-      definitionVersion: "smoke", sampleCount: 22, quality: "usable",
-      limitations: ["Projected shoulder line; camera roll changes the value."],
-    }],
-    captureNotes: ["smoke test"],
+    requestId: `smoke-${Date.now()}`, scanId: "smoke",
+    views: ["front", "right", "back", "left"],
+    measurements: [],
+    captureNotes: ["Four-view development smoke test; no verified numeric measurements."],
+    locale: "en-CA",
   }));
-  form.set("image", new Blob([readFileSync(image)], { type: "image/png" }), "frame.png");
+  for (const view of ["front", "right", "back", "left"]) {
+    form.set(view, new Blob([readFileSync(image)], { type: "image/png" }), `${view}.png`);
+  }
   form.set("audio", new Blob([readFileSync(audio.path)], { type: "audio/wav" }), "question.wav");
 
   const t0 = Date.now();
-  const res = await fetch(`${url}/v1/coach/turn`, { method: "POST", body: form });
+  const res = await fetch(`${url}/v1/guidance/report`, { method: "POST", body: form });
   const body = await res.json().catch(() => ({}));
   const ms = Date.now() - t0;
 
   if (!res.ok) {
     console.error(`FAIL  HTTP ${res.status}  error=${body.error ?? "?"}  (${ms}ms)`);
-    const why = serverLog.match(/omni_turn_failed \S+ (.*)/);
+    const why = serverLog.match(/guidance_(?:failed|invalid) \S+ (.*)/);
     if (why) console.error(`      provider said: ${why[1]}`);
     exitCode = 1;
   } else {
     console.log(`PASS  HTTP 200  ${ms}ms`);
-    console.log(`  text           : ${(body.text ?? "").replace(/\s+/g, " ").slice(0, 200)}`);
+    console.log(`  summary        : ${(body.summary ?? "").replace(/\s+/g, " ").slice(0, 200)}`);
+    console.log(`  provider mode  : ${body.providerMode}`);
     console.log(`  model          : ${body.model}`);
+    console.log(`  sources        : ${(body.sources ?? []).map((source) => source.id).join(", ") || "none"}`);
     console.log(`  speechProvider : ${body.speechProvider}`);
     console.log(`  audio          : ${body.audioBase64 ? `${body.audioBase64.length} b64 chars` : "none (captions only)"}`);
     if (body.degraded) console.log("  degraded       : audio was requested and the provider did not return it");

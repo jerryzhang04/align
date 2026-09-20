@@ -9,7 +9,7 @@ import { listSessions, type SavedSession } from "../src/services/history";
 import { useScan } from "../src/state/ScanContext";
 import { colors, radius, spacing } from "../src/theme";
 
-type Readiness = "checking" | "configured" | "partial" | "offline";
+type Readiness = "checking" | "omni" | "unconfigured" | "offline";
 
 export default function HomeScreen() {
   const { reset } = useScan();
@@ -19,7 +19,7 @@ export default function HomeScreen() {
   useEffect(() => {
     const controller = new AbortController();
     checkCoachHealth(controller.signal)
-      .then((health) => setReadiness(health.omniConfigured ? "configured" : "partial"))
+      .then((health) => setReadiness(health.providerMode === "omni" ? "omni" : "unconfigured"))
       .catch(() => setReadiness("offline"));
     return () => controller.abort();
   }, []);
@@ -35,8 +35,8 @@ export default function HomeScreen() {
 
   const statusCopy = {
     checking: "Checking coach…",
-    configured: "OMNI coaching configured",
-    partial: "Capture ready · coach needs setup",
+    omni: "OMNI multimodal guidance ready",
+    unconfigured: "Capture ready · guidance needs setup",
     offline: "Offline capture available",
   }[readiness];
 
@@ -72,7 +72,7 @@ export default function HomeScreen() {
 
         <PrimaryButton label="Start guided scan" onPress={start} />
         <View style={styles.statusRow}>
-          <View style={[styles.statusDot, readiness === "configured" && styles.statusReady]} />
+          <View style={[styles.statusDot, readiness === "omni" && styles.statusReady]} />
           <Text style={styles.statusText}>{statusCopy}</Text>
         </View>
 

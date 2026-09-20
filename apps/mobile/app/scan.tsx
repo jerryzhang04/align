@@ -17,7 +17,7 @@ import { ProgressRail } from "../src/components/ProgressRail";
 import { CAPTURE_VIEWS, advanceCapture } from "../src/lib/captureFlow";
 import { createOperationGate } from "../src/lib/operationGate";
 import { cacheCoachAudio } from "../src/services/audioFile";
-import { askCoach } from "../src/services/coach";
+import { askCoach, requestGuidance } from "../src/services/coach";
 import { discardCaptures, discardLocalFiles, persistCapture } from "../src/services/captures";
 import { useScan } from "../src/state/ScanContext";
 import { colors, radius, spacing } from "../src/theme";
@@ -34,7 +34,7 @@ export default function ScanScreen() {
   const mounted = useRef(true);
   const recorderActive = useRef(false);
   const coachAudioFile = useRef<string | null>(null);
-  const { scanId, captures, cloudCoachEnabled, coachCaption, setCapture, setCoachCaption, reset } = useScan();
+  const { scanId, captures, cloudCoachEnabled, coachCaption, setCapture, setCoachCaption, setGuidanceReport, reset } = useScan();
   const firstMissing = CAPTURE_VIEWS.find((view) => !captures[view.id])?.id ?? params.retake ?? "front";
   const [active, setActive] = useState<ViewId>(firstMissing);
   const [countdown, setCountdown] = useState<number | null>(null);
@@ -42,6 +42,7 @@ export default function ScanScreen() {
   const [recording, setRecording] = useState(false);
   const [coachBusy, setCoachBusy] = useState(false);
   const [error, setError] = useState("");
+  const [awaitingGuidance, setAwaitingGuidance] = useState(false);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const player = useAudioPlayer(null);
 
@@ -91,7 +92,8 @@ export default function ScanScreen() {
       setCapture(active, stagedPhoto);
       const next = advanceCapture(active);
       if (next === "complete") {
-        router.replace("/recap");
+        if (cloudCoachEnabled) setAwaitingGuidance(true);
+        else router.replace("/recap");
       } else {
         setActive(next);
       }
@@ -157,29 +159,49 @@ export default function ScanScreen() {
       await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
       audioUri = recorder.uri;
       if (!audioUri) throw new Error("missing_recording");
-      if (!camera.current) throw new Error("missing_camera");
-      const photo = await camera.current.takePictureAsync({ quality: 0.5, shutterSound: false });
-      frameUri = photo.uri;
       requestController.current?.abort();
       const controller = new AbortController();
       requestController.current = controller;
-      const response = await askCoach({
-        requestId: `turn-${Date.now()}`,
-        scanId,
-        stage: active,
-        imageUri: photo.uri,
-        audioUri,
-        signal: controller.signal,
-      });
-      if (!mounted.current) return;
-      setCoachCaption(response.text);
-      if (response.audioBase64) {
-        const audioFile = cacheCoachAudio(response.audioBase64, response.audioMime);
+      let responseAudio: string | undefined;
+      let responseMime: string | undefined;
+      if (awaitingGuidance) {
+        const report = await requestGuidance({
+          requestId: `report-${Date.now()}`,
+          scanId,
+          captures,
+          audioUri,
+          signal: controller.signal,
+        });
+        if (!mounted.current) return;
+        setGuidanceReport(report);
+        setCoachCaption(report.summary);
+        responseAudio = report.audioBase64;
+        responseMime = report.audioMime;
+      } else {
+        if (!camera.current) throw new Error("missing_camera");
+        const photo = await camera.current.takePictureAsync({ quality: 0.5, shutterSound: false });
+        frameUri = photo.uri;
+        const response = await askCoach({
+          requestId: `turn-${Date.now()}`,
+          scanId,
+          stage: active,
+          imageUri: photo.uri,
+          audioUri,
+          signal: controller.signal,
+        });
+        if (!mounted.current) return;
+        setCoachCaption(response.text);
+        responseAudio = response.audioBase64;
+        responseMime = response.audioMime;
+      }
+      if (responseAudio && !awaitingGuidance) {
+        const audioFile = cacheCoachAudio(responseAudio, responseMime);
         await discardLocalFiles(coachAudioFile.current);
         coachAudioFile.current = audioFile;
         player.replace(audioFile);
         player.play();
       }
+      if (awaitingGuidance) router.replace("/recap");
     } catch (caught) {
       if (caught instanceof Error && caught.name === "AbortError") return;
       if (mounted.current) {
@@ -238,8 +260,8 @@ export default function ScanScreen() {
         <ProgressRail active={active} captures={captures} />
 
         <View style={styles.instructionCard}>
-          <Text style={styles.viewLabel}>{activeView.label.toUpperCase()} VIEW</Text>
-          <Text style={styles.instruction}>{activeView.instruction}</Text>
+          <Text style={styles.viewLabel}>{awaitingGuidance ? "FINAL STEP" : `${activeView.label.toUpperCase()} VIEW`}</Text>
+          <Text style={styles.instruction}>{awaitingGuidance ? "Hold the microphone and describe what feels uncomfortable or what you want help with." : activeView.instruction}</Text>
         </View>
 
         <View pointerEvents="none" style={styles.frameGuide}>
@@ -260,7 +282,7 @@ export default function ScanScreen() {
           <View style={styles.actionRow}>
             <View style={styles.coachAction}>
               <PrimaryButton
-                label={recording ? "Listening… release" : coachBusy ? "Thinking…" : cloudCoachEnabled ? "Hold to ask" : "Coach off"}
+                label={recording ? "Listening… release" : coachBusy ? "Reviewing four views…" : awaitingGuidance ? "Hold to describe your goal" : cloudCoachEnabled ? "Hold to ask" : "Coach off"}
                 variant="secondary"
                 disabled={!cloudCoachEnabled || coachBusy}
                 onPressIn={startQuestion}
@@ -268,15 +290,19 @@ export default function ScanScreen() {
                 icon={coachBusy ? <ActivityIndicator color={colors.tealDark} /> : <SymbolView name={recording ? "waveform" : "mic.fill"} size={19} tintColor={recording ? colors.coral : colors.tealDark} />}
               />
             </View>
-            <PrimaryButton
-              label={busy ? "Capturing…" : `Capture ${activeView.label}`}
-              disabled={busy || recording || coachBusy}
-              onPress={captureView}
-              style={styles.captureAction}
-              icon={<SymbolView name="camera.fill" size={19} tintColor={colors.white} />}
-            />
+            {awaitingGuidance ? (
+              <PrimaryButton label="Skip guidance" variant="secondary" disabled={recording || coachBusy} onPress={() => router.replace("/recap")} style={styles.captureAction} />
+            ) : (
+              <PrimaryButton
+                label={busy ? "Capturing…" : `Capture ${activeView.label}`}
+                disabled={busy || recording || coachBusy}
+                onPress={captureView}
+                style={styles.captureAction}
+                icon={<SymbolView name="camera.fill" size={19} tintColor={colors.white} />}
+              />
+            )}
           </View>
-          <Text style={styles.hint}>{cloudCoachEnabled ? "Hold Ask coach, speak, then release. The current frame goes with your question." : "Local-only mode: no frame or audio leaves this iPhone."}</Text>
+          <Text style={styles.hint}>{awaitingGuidance ? "Your four captured views and this recording are reviewed together." : cloudCoachEnabled ? "Hold Ask coach, speak, then release. The current frame goes with your question." : "Local-only mode: no frame or audio leaves this iPhone."}</Text>
         </View>
       </SafeAreaView>
     </View>

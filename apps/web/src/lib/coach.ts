@@ -10,7 +10,15 @@ function headers(): HeadersInit {
 export async function fetchHealth(): Promise<HealthResponse> {
   const response = await fetch("/v1/health");
   if (!response.ok) {
-    return { ok: false, omniConfigured: false, model: null };
+    return {
+      ok: false,
+      omniConfigured: false,
+      guidanceConfigured: false,
+      providerMode: "unconfigured",
+      provider: null,
+      nativeAudioExpected: false,
+      model: null,
+    };
   }
   return (await response.json()) as HealthResponse;
 }

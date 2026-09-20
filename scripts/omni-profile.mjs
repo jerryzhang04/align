@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// Switch the coaching provider in .env between the sponsor OMNI endpoint and a
-// development fallback, so swapping when a credential arrives is one command.
+// Apply the sponsor OMNI configuration without exposing the credential.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,14 +12,6 @@ export const PROFILES = {
     OMNI_AUDIO_OUTPUT: "true",
     keyHint: "sk-... issued for yibuapi.com",
     note: "Native audio expected. This is the only profile valid for the Huawei track.",
-  },
-  openrouter: {
-    label: "OpenRouter / Gemini 2.5 Flash (development fallback)",
-    OMNI_BASE_URL: "https://openrouter.ai/api/v1",
-    OMNI_MODEL: "google/gemini-2.5-flash",
-    OMNI_AUDIO_OUTPUT: "false",
-    keyHint: "sk-or-v1-...",
-    note: "Joint image+audio understanding, captions only. NOT OMNI — do not present it as OMNI.",
   },
 };
 

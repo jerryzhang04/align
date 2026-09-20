@@ -14,16 +14,17 @@ const input = {
 
 afterEach(() => {
   delete process.env.OMNI_AUDIO_OUTPUT;
+  delete process.env.OMNI_BASE_URL;
 });
 
 describe("contentParts", () => {
-  it("sends input_audio.data as raw base64, never a data: URI", () => {
+  it("encodes input_audio.data as the YibuAPI data URI", () => {
+    process.env.OMNI_BASE_URL = "https://yibuapi.com/v1";
     const audio = contentParts(input, true).find((p) => p.type === "input_audio") as {
       input_audio: { data: string; format: string };
     };
 
-    expect(audio.input_audio.data).toBe("AUDIODATA");
-    expect(audio.input_audio.data.startsWith("data:")).toBe(false);
+    expect(audio.input_audio.data).toBe("data:audio/wav;base64,AUDIODATA");
     expect(audio.input_audio.format).toBe("wav");
   });
 

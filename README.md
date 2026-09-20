@@ -50,8 +50,8 @@ To use the simulator instead, run `npm run api` and `npm run mobile:ios` in sepa
 
 Set credentials only in the ignored root `.env`. Never put provider credentials in `EXPO_PUBLIC_*` variables.
 
-- `OMNI_API_KEY` must be issued by the service at `OMNI_BASE_URL`. An OpenRouter key is not accepted by the default Yibu endpoint.
-- `OMNI_AUDIO_OUTPUT=true` requests native OMNI speech. Set it to `false` when the selected OpenAI-compatible provider supports text but not audio output.
+- `OMNI_API_KEY` must be a sponsor-issued YibuAPI credential. Non-Yibu providers and non-OMNI models are rejected by the server.
+- `OMNI_AUDIO_OUTPUT=true` requests native OMNI speech. Set it to `false` only when the Yibu configuration returns text without audio.
 - The current architecture uses OMNI for multimodal understanding and speech. When OMNI returns no audio, the app keeps the response visible as captions.
 - The app remains usable for local capture when cloud coaching is unavailable.
 
@@ -63,6 +63,8 @@ Set credentials only in the ignored root `.env`. Never put provider credentials 
 - Push-to-talk recording with the current camera frame attached.
 - OMNI multimodal backend turn with abort, payload bounds, rate limits, and safe error mapping.
 - OMNI-native speech for OMNI's response, with a caption fallback when the model returns text only.
+- Four-view plus spoken-goal analysis with structured observations, conservative actions, safety escalation, and server-resolved evidence citations.
+- A versioned evidence catalog backed by WHO, CCOHS, NICE, NHS, and peer-reviewed systematic-review sources.
 - One-command LAN launchers with an ephemeral bearer token for physical-device testing.
 - Disposable image staging until Save, followed by persistent local images and SQLite session summaries.
 - VoiceOver labels, captions, minimum touch targets, and explicit local/cloud consent.

@@ -4,8 +4,7 @@
 **Date:** 2026-09-19  
 **Product boundary:** Wellness guidance, not diagnosis or treatment  
 **Primary demo surface:** Expo iPhone app  
-**Current development provider:** Gemini 2.5 Flash through OpenRouter  
-**Sponsor provider:** Qwen3.5-Omni Plus through YibuAPI when credentials are approved
+**Runtime provider:** Qwen3.5-Omni Plus through YibuAPI only
 
 ## 1. Outcome
 
@@ -30,8 +29,7 @@ The implementation must make the following facts demonstrable:
 - The model receives all four real scan images in their capture order.
 - Vision, speech, and language contribute to one answer rather than appearing as disconnected features.
 - The experience reaches a useful recap without relying on a hidden or optional in-scan control.
-- The configured provider and model are shown truthfully. The development fallback must never be presented as OMNI.
-- The sponsor provider can replace the fallback through environment configuration without changing the client contract.
+- The configured provider and model are shown truthfully, and non-Yibu providers are rejected.
 - Failures preserve local captures and explain whether the provider, network, response validation, or configuration failed.
 
 ## 3. Non-goals
@@ -85,13 +83,13 @@ If analysis fails, the user can retry or continue to recap and save the captures
 `GET /v1/health` returns:
 
 ```ts
-type ProviderMode = "omni" | "development-fallback" | "unconfigured";
+type ProviderMode = "omni" | "unconfigured";
 
 type HealthResponse = {
   ok: true;
   guidanceConfigured: boolean;
   providerMode: ProviderMode;
-  provider: "yibu" | "openrouter" | "custom" | null;
+  provider: "yibu" | null;
   model: string | null;
   nativeAudioExpected: boolean;
 };
@@ -201,15 +199,13 @@ Guidance must distinguish three layers:
 Provider selection is derived from server configuration:
 
 - Yibu base URL plus `qwen3.5-omni-plus` -> `omni`;
-- OpenRouter base URL -> `development-fallback`;
-- missing key -> `unconfigured`;
-- any other endpoint -> `development-fallback` unless explicitly mapped and tested.
+- missing key, another host, or another model -> `unconfigured`.
 
 The client uses one stable application contract regardless of provider. Provider-specific request construction remains inside the API workspace.
 
 ### 7.2 Analysis call
 
-One multimodal analysis call receives all four images, the actual audio, capture context, the evidence summaries, and strict output instructions. The preferred Qwen payload represents the ordered stills as one visual sequence and the recording as the audio modality in the same conversation context. The OpenRouter adapter sends the equivalent supported multimodal content.
+One multimodal analysis call receives all four images, the actual audio, capture context, the evidence summaries, and strict output instructions. The Qwen payload represents the ordered stills as one visual sequence and the recording as the audio modality in the same conversation context.
 
 The analysis request asks for text-only structured JSON. It must return:
 
@@ -226,7 +222,7 @@ The response is parsed with Zod. Invalid JSON, unknown source IDs, unsupported n
 
 After validation and deterministic safety handling, the server builds a short narration from the accepted report. When native audio is enabled, a second request asks the same configured OMNI model to speak exactly that narration. This prevents spoken content from diverging from the validated captions.
 
-The development fallback does not synthesize speech. It returns the validated report with `speechProvider: "none"`.
+If OMNI returns no audio, the server returns the validated report with `speechProvider: "none"` and complete captions.
 
 ### 7.4 Streaming
 
@@ -273,7 +269,7 @@ Raw recordings and temporary analysis frames are deleted after every request out
 - Abort, timeout, provider HTTP failure, invalid provider response, and evidence validation failure have different internal categories and stable client codes.
 - Logs contain request ID, provider mode, model, status category, latency, image count, and whether audio was returned. They never contain media, transcript text, model output, or secrets.
 - The health route reports configuration truthfully but does not make a live paid provider call.
-- A dedicated smoke command performs a real four-image-plus-audio request. Its output labels the provider mode and fails if an OMNI-required smoke run reaches the fallback.
+- A dedicated smoke command performs a real four-image-plus-audio request and fails unless the configured provider is OMNI through YibuAPI.
 
 ## 11. Testing strategy
 
@@ -297,7 +293,7 @@ Implementation follows test-driven development.
 - provider timeouts and malformed responses produce stable errors;
 - simultaneous scan IDs do not cancel each other;
 - a new request for the same scan ID cancels the old request;
-- fallback mode is returned as fallback, never OMNI.
+- a non-Yibu provider is reported as unconfigured and is never called.
 
 ### Client tests
 
@@ -312,7 +308,7 @@ Implementation follows test-driven development.
 Before claiming the development path works:
 
 - run the full repository tests and build;
-- run a real OpenRouter four-image-plus-audio smoke request and record model/latency;
+- run a real Yibu Qwen four-image-plus-audio smoke request and record model/latency;
 - run the flow on the available iPhone or simulator.
 
 Before claiming sponsor readiness:
@@ -328,8 +324,8 @@ Before claiming sponsor readiness:
 The implementation is accepted when:
 
 1. A user can complete four captures, record one spoken goal, receive a structured sourced report, and save it without leaving the guided flow.
-2. The development fallback handles all four images and the actual audio but is visibly and programmatically labeled as a fallback.
-3. Switching to Yibu requires environment changes only.
+2. Only Yibu/Qwen OMNI can be configured; other provider endpoints are rejected.
+3. The server sends all four images and the actual audio to OMNI.
 4. Every action cites at least one registered evidence source.
 5. The server rejects unsupported citations, diagnostic language, and invented numerical findings.
 6. Urgent signals trigger deterministic escalation language.
