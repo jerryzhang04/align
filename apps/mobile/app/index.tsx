@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useFocusEffect } from "expo-router";
 import { SymbolView } from "expo-symbols";
@@ -50,7 +50,7 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.brandRow}>
-          <View style={styles.mark}><View style={styles.markLine} /></View>
+          <Image source={require("../assets/align-mark.png")} style={styles.mark} accessibilityIgnoresInvertColors />
           <Text style={styles.brand}>ALIGN</Text>
         </View>
 
@@ -118,8 +118,7 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.canvas },
   content: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.xxl, gap: spacing.lg },
   brandRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  mark: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.tealDark, alignItems: "center", justifyContent: "center" },
-  markLine: { width: 3, height: 15, borderRadius: 2, backgroundColor: colors.white, transform: [{ rotate: "18deg" }] },
+  mark: { width: 28, height: 28, borderRadius: 8 },
   brand: { color: colors.ink, fontSize: 13, fontWeight: "900", letterSpacing: 2.6 },
   hero: { gap: spacing.sm, paddingTop: spacing.md },
   eyebrow: { color: colors.tealDark, fontSize: 12, fontWeight: "800", letterSpacing: 1.4 },

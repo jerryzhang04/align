@@ -17,6 +17,7 @@ scans/
 *.mp4
 *.mov
 !docs/**
+!apps/mobile/assets/**
 .idea/
 .vscode/
 *.iml
