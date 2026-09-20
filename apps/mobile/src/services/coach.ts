@@ -1,4 +1,5 @@
 import { fetchWithTimeout } from "./request";
+import { runtimeCoachApi } from "./runtimeCoachApi";
 import {
   coachTurnResponseSchema,
   guidanceReportSchema,
@@ -12,17 +13,25 @@ import {
 } from "@align/contracts";
 import type { Captures } from "../lib/captureFlow";
 
-const apiUrl = (process.env.EXPO_PUBLIC_ALIGN_API_URL ?? "http://127.0.0.1:8788").replace(/\/$/, "");
-const apiToken = process.env.EXPO_PUBLIC_ALIGN_API_TOKEN ?? "";
+function connection() {
+  return runtimeCoachApi();
+}
 
-function headers() {
-  return apiToken ? { Authorization: `Bearer ${apiToken}` } : undefined;
+function headers(token: string) {
+  return token ? { Authorization: `Bearer ${token}` } : undefined;
+}
+
+function parseOk<T>(schema: { safeParse: (data: unknown) => { success: true; data: T } | { success: false } }, payload: unknown, code: string): T {
+  const parsed = schema.safeParse(payload);
+  if (!parsed.success) throw new Error(code);
+  return parsed.data;
 }
 
 export async function checkCoachHealth(signal?: AbortSignal): Promise<HealthResponse> {
-  const response = await fetchWithTimeout(`${apiUrl}/v1/health`, { signal, headers: headers() }, 5_000);
+  const { baseUrl, token } = connection();
+  const response = await fetchWithTimeout(`${baseUrl}/v1/health`, { signal, headers: headers(token) }, 5_000);
   if (!response.ok) throw new Error("coach_unavailable");
-  return healthResponseSchema.parse(await response.json());
+  return parseOk(healthResponseSchema, await response.json(), "coach_invalid_response");
 }
 
 export async function askCoach(input: {
@@ -33,6 +42,7 @@ export async function askCoach(input: {
   audioUri: string;
   signal?: AbortSignal;
 }): Promise<CoachTurnResponse> {
+  const { baseUrl, token } = connection();
   const form = new FormData();
   form.append("meta", JSON.stringify({
     requestId: input.requestId,
@@ -44,18 +54,20 @@ export async function askCoach(input: {
   form.append("image", { uri: input.imageUri, name: "coach-frame.jpg", type: "image/jpeg" } as unknown as Blob);
   form.append("audio", { uri: input.audioUri, name: "question.m4a", type: "audio/mp4" } as unknown as Blob);
 
-  const response = await fetchWithTimeout(`${apiUrl}/v1/coach/turn`, {
+  const response = await fetchWithTimeout(`${baseUrl}/v1/coach/turn`, {
     method: "POST",
     body: form,
-    headers: headers(),
+    headers: headers(token),
     signal: input.signal,
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const code = typeof payload?.error === "string" ? payload.error : "coach_failed";
+    const code = payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string"
+      ? payload.error
+      : "coach_failed";
     throw new Error(code);
   }
-  return coachTurnResponseSchema.parse(payload);
+  return parseOk(coachTurnResponseSchema, payload, "coach_invalid_response");
 }
 
 export async function requestGuidance(input: {
@@ -65,6 +77,7 @@ export async function requestGuidance(input: {
   audioUri: string;
   signal?: AbortSignal;
 }): Promise<GuidanceReport> {
+  const { baseUrl, token } = connection();
   const form = new FormData();
   form.append("meta", JSON.stringify({
     requestId: input.requestId,
@@ -80,15 +93,15 @@ export async function requestGuidance(input: {
     form.append(view, { uri, name: `${view}.jpg`, type: "image/jpeg" } as unknown as Blob);
   }
   form.append("audio", { uri: input.audioUri, name: "goal.m4a", type: "audio/mp4" } as unknown as Blob);
-  const response = await fetchWithTimeout(`${apiUrl}/v1/guidance/report`, {
+  const response = await fetchWithTimeout(`${baseUrl}/v1/guidance/report`, {
     method: "POST",
     body: form,
-    headers: headers(),
+    headers: headers(token),
     signal: input.signal,
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(typeof payload?.error === "string" ? payload.error : "guidance_failed");
-  return guidanceReportSchema.parse(payload);
+  if (!response.ok) throw new Error(payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string" ? payload.error : "guidance_failed");
+  return parseOk(guidanceReportSchema, payload, "coach_invalid_response");
 }
 
 export async function requestPoseMeasurements(input: {
@@ -97,6 +110,7 @@ export async function requestPoseMeasurements(input: {
   captures: Captures;
   signal?: AbortSignal;
 }): Promise<PoseMeasureResponse> {
+  const { baseUrl, token } = connection();
   const form = new FormData();
   form.append("meta", JSON.stringify({
     requestId: input.requestId,
@@ -108,13 +122,13 @@ export async function requestPoseMeasurements(input: {
     if (!uri) throw new Error("missing_capture");
     form.append(view, { uri, name: `${view}.jpg`, type: "image/jpeg" } as unknown as Blob);
   }
-  const response = await fetchWithTimeout(`${apiUrl}/v1/pose/measure`, {
+  const response = await fetchWithTimeout(`${baseUrl}/v1/pose/measure`, {
     method: "POST",
     body: form,
-    headers: headers(),
+    headers: headers(token),
     signal: input.signal,
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(typeof payload?.error === "string" ? payload.error : "pose_failed");
-  return poseMeasureResponseSchema.parse(payload);
+  if (!response.ok) throw new Error(payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string" ? payload.error : "pose_failed");
+  return parseOk(poseMeasureResponseSchema, payload, "coach_invalid_response");
 }

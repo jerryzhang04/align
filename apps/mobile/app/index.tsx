@@ -5,6 +5,7 @@ import { router, useFocusEffect } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { PrimaryButton } from "../src/components/PrimaryButton";
 import { checkCoachHealth } from "../src/services/coach";
+import { coachErrorMessage } from "../src/services/request";
 import { listSessions, type SavedSession } from "../src/services/history";
 import { useScan } from "../src/state/ScanContext";
 import { colors, radius, spacing } from "../src/theme";
@@ -15,12 +16,17 @@ export default function HomeScreen() {
   const { reset } = useScan();
   const [readiness, setReadiness] = useState<Readiness>("checking");
   const [sessions, setSessions] = useState<SavedSession[]>([]);
+  const [offlineDetail, setOfflineDetail] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
     checkCoachHealth(controller.signal)
       .then((health) => setReadiness(health.providerMode === "omni" ? "omni" : "unconfigured"))
-      .catch(() => setReadiness("offline"));
+      .catch((error) => {
+        if (error instanceof Error && error.name === "AbortError") return;
+        setReadiness("offline");
+        setOfflineDetail(coachErrorMessage(error));
+      });
     return () => controller.abort();
   }, []);
 
@@ -51,7 +57,7 @@ export default function HomeScreen() {
         <View style={styles.hero}>
           <Text style={styles.eyebrow}>GUIDED POSTURE CAPTURE</Text>
           <Text accessibilityRole="header" style={styles.title}>Set the phone down. Step into frame.</Text>
-          <Text style={styles.subtitle}>Align guides one slow live scan, samples useful views automatically, and responds with one calm voice.</Text>
+          <Text style={styles.subtitle}>Match your head and shoulders to the outline. It fills green, takes the photo, then moves to the next view.</Text>
         </View>
 
         <View style={styles.previewCard}>
@@ -75,6 +81,7 @@ export default function HomeScreen() {
           <View style={[styles.statusDot, readiness === "omni" && styles.statusReady]} />
           <Text style={styles.statusText}>{statusCopy}</Text>
         </View>
+        {readiness === "offline" && offlineDetail ? <Text style={styles.offlineDetail}>{offlineDetail}</Text> : null}
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Recent sessions</Text>
@@ -132,6 +139,7 @@ const styles = StyleSheet.create({
   statusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.amber },
   statusReady: { backgroundColor: colors.teal },
   statusText: { color: colors.muted, fontSize: 13, fontWeight: "600" },
+  offlineDetail: { color: colors.muted, fontSize: 12, lineHeight: 18, textAlign: "center", paddingHorizontal: spacing.md },
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", marginTop: spacing.sm },
   sectionTitle: { color: colors.ink, fontSize: 20, fontWeight: "700", letterSpacing: -0.4 },
   privateText: { color: colors.muted, fontSize: 12 },

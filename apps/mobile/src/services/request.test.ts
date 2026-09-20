@@ -14,4 +14,12 @@ describe("coach requests", () => {
   it("explains provider failure without claiming the scan was lost", () => {
     expect(coachErrorMessage(new Error("omni_failed"))).toContain("provider");
   });
+  it("does not call a loopback or parse failure a Wi-Fi problem", () => {
+    expect(coachErrorMessage(new Error("coach_loopback_url"))).toContain("127.0.0.1");
+    expect(coachErrorMessage(new Error("Network request failed"))).toContain("port 8788");
+    const invalid = new Error("invalid");
+    invalid.name = "ZodError";
+    expect(coachErrorMessage(invalid)).toContain("could not be verified");
+    expect(coachErrorMessage(new Error("something-else"))).not.toContain("Wi-Fi");
+  });
 });

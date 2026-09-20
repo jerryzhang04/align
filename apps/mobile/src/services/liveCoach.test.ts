@@ -1,4 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+
+vi.mock("expo-constants", () => ({
+  default: { expoConfig: { hostUri: null }, linkingUri: "" },
+}));
+
 import { createLiveCoachClient } from "./liveCoach";
 
 const report = {

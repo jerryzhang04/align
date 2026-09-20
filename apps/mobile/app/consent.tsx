@@ -25,7 +25,7 @@ export default function ConsentScreen() {
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <View style={styles.heroIcon}><SymbolView name="hand.raised.fill" size={32} tintColor={colors.tealDark} /></View>
       <Text accessibilityRole="header" style={styles.title}>You decide what leaves the phone.</Text>
-      <Text style={styles.lead}>Capture can stay local. If you continue with the voice coach, sampled frames upload during the live scan so OMNI can review the rotation and answer you.</Text>
+      <Text style={styles.lead}>Capture can stay local. If you continue with the voice coach, each outline photo can upload so OMNI can review the four views and answer you.</Text>
 
       <View style={styles.card}>
         <PrivacyRow symbol="iphone" title="Live camera scan" body="Align samples a slow live rotation. Voice-coach mode uploads those samples to the private coaching server; local mode keeps them on this iPhone." />

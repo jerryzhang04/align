@@ -1,4 +1,5 @@
 import { guidanceReportSchema, type GuidanceReport, type Measurement, type ViewId } from "@align/contracts";
+import { runtimeCoachApi } from "./runtimeCoachApi";
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -80,7 +81,9 @@ export function createLiveCoachClient({ baseUrl, token, fetchImpl = fetch }: Cli
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw serverError(payload, "live_guidance_failed");
-      return guidanceReportSchema.parse(payload);
+      const parsed = guidanceReportSchema.safeParse(payload);
+      if (!parsed.success) throw new Error("coach_invalid_response");
+      return parsed.data;
     },
 
     async reset(scanId: string, signal?: AbortSignal): Promise<void> {
@@ -97,11 +100,11 @@ export function createLiveCoachClient({ baseUrl, token, fetchImpl = fetch }: Cli
   };
 }
 
-const defaultClient = createLiveCoachClient({
-  baseUrl: process.env.EXPO_PUBLIC_ALIGN_API_URL ?? "http://127.0.0.1:8788",
-  token: process.env.EXPO_PUBLIC_ALIGN_API_TOKEN ?? "",
-});
+function defaultClient() {
+  const { baseUrl, token } = runtimeCoachApi();
+  return createLiveCoachClient({ baseUrl, token });
+}
 
-export const uploadLiveFrame = defaultClient.uploadFrame;
-export const finalizeLiveSession = defaultClient.finalize;
-export const resetLiveSession = defaultClient.reset;
+export const uploadLiveFrame: ReturnType<typeof createLiveCoachClient>["uploadFrame"] = (input) => defaultClient().uploadFrame(input);
+export const finalizeLiveSession: ReturnType<typeof createLiveCoachClient>["finalize"] = (input) => defaultClient().finalize(input);
+export const resetLiveSession: ReturnType<typeof createLiveCoachClient>["reset"] = (scanId, signal) => defaultClient().reset(scanId, signal);

@@ -34,6 +34,17 @@ describe("guidance model adapter", () => {
     expect(body.indexOf("BACK")).toBeLessThan(body.indexOf("LEFT"));
     expect(body).toContain("AUDIO");
     expect(body).toContain("data:audio/mp4;base64,AUDIO");
+    expect(buildAnalysisRequest(input, {
+      configured: true,
+      mode: "unconfigured",
+      provider: null,
+      model: "openrouter-test",
+      baseUrl: "https://openrouter.ai/api/v1",
+      apiKey: "key",
+      nativeAudioExpected: false,
+    }).messages[1]?.content).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "input_audio", input_audio: expect.objectContaining({ data: "AUDIO" }) }),
+    ]));
     expect(body).toContain("ccohs-working-posture");
     expect(body).toContain('"type":"json_object"');
   });

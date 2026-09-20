@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Image, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
@@ -10,6 +10,7 @@ import { CAPTURE_VIEWS, captureProgress } from "../src/lib/captureFlow";
 import { discardLocalFiles, finalizeCaptures } from "../src/services/captures";
 import { cacheCoachAudio } from "../src/services/audioFile";
 import { saveSession } from "../src/services/history";
+import { localWellnessReport } from "../src/lib/localGuidance";
 import { useScan } from "../src/state/ScanContext";
 import { colors, radius, spacing } from "../src/theme";
 
@@ -20,15 +21,19 @@ export default function RecapScreen() {
   const reportAudioFile = useRef<string | null>(null);
   const player = useAudioPlayer(null);
   const progress = captureProgress(captures);
+  const displayReport = useMemo(
+    () => guidanceReport ?? localWellnessReport({ requestId: scanId, measurements }),
+    [guidanceReport, measurements, scanId],
+  );
 
   useEffect(() => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
   }, []);
 
   useEffect(() => {
-    if (!guidanceReport?.audioBase64) return;
+    if (!displayReport.audioBase64) return;
     try {
-      const file = cacheCoachAudio(guidanceReport.audioBase64, guidanceReport.audioMime);
+      const file = cacheCoachAudio(displayReport.audioBase64, displayReport.audioMime);
       reportAudioFile.current = file;
       player.replace(file);
       player.play();
@@ -38,13 +43,13 @@ export default function RecapScreen() {
     return () => {
       void discardLocalFiles(reportAudioFile.current);
     };
-  }, [guidanceReport, player]);
+  }, [displayReport, player]);
 
   const save = async () => {
     setSaving(true);
     try {
       await finalizeCaptures(scanId, captures, async (persistent) => {
-        await saveSession({ id: scanId, createdAt: new Date().toISOString(), captures: persistent, coachCaption, guidanceReport, measurements: measurements.length ? measurements : guidanceReport?.measurements ?? [] });
+        await saveSession({ id: scanId, createdAt: new Date().toISOString(), captures: persistent, coachCaption, guidanceReport: displayReport, measurements: measurements.length ? measurements : displayReport.measurements });
       });
       setSaved(true);
     } catch {
@@ -62,7 +67,7 @@ export default function RecapScreen() {
   return (
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <View style={styles.successIcon}><SymbolView name="checkmark" size={31} tintColor={colors.white} weight="bold" /></View>
-      <Text accessibilityRole="header" style={styles.title}>Your live scan is complete.</Text>
+      <Text accessibilityRole="header" style={styles.title}>Your four views are saved.</Text>
       <Text style={styles.lead}>{progress.accepted} milestone views retained from the continuous scan. This confirms capture coverage—not posture quality.</Text>
 
       <View style={styles.gallery}>
@@ -75,34 +80,34 @@ export default function RecapScreen() {
       </View>
 
       <MeasurementList
-        measurements={measurements.length ? measurements : guidanceReport?.measurements ?? []}
+        measurements={measurements.length ? measurements : displayReport.measurements}
         localOnly={!cloudCoachEnabled}
       />
 
-      {guidanceReport ? (
-        <View style={styles.coachCard}>
-          <Text style={styles.coachLabel}>EVIDENCE-BACKED GUIDANCE</Text>
-          {guidanceReport.safety.level !== "wellness" ? <Text style={styles.safetyText}>{guidanceReport.safety.message}</Text> : null}
-          <Text style={styles.coachText}>{guidanceReport.summary}</Text>
-          {guidanceReport.observations.map((observation) => (
-            <View key={observation.id} style={styles.guidanceItem}>
-              <Text style={styles.guidanceTitle}>What was visible</Text>
-              <Text style={styles.guidanceBody}>{observation.text}</Text>
-            </View>
-          ))}
-          {guidanceReport.actions.map((action) => (
-            <View key={action.id} style={styles.guidanceItem}>
-              <Text style={styles.guidanceTitle}>{action.title}</Text>
-              <Text style={styles.guidanceBody}>{action.instruction}</Text>
-              <Text style={styles.guidanceRationale}>{action.rationale}</Text>
-            </View>
-          ))}
-          {guidanceReport.limitations.map((limitation) => <Text key={limitation} style={styles.sourceText}>{limitation}</Text>)}
-          <Text style={styles.sourceHeading}>Sources used</Text>
-          {guidanceReport.sources.map((source) => <Text key={source.id} style={styles.sourceText}>{source.publisher} · {source.title}{"\n"}{source.url}</Text>)}
-          <Text style={styles.providerText}>OMNI · {guidanceReport.model}</Text>
-        </View>
-      ) : coachCaption ? (
+      <View style={styles.coachCard}>
+        <Text style={styles.coachLabel}>{displayReport.speechProvider === "omni" ? "EVIDENCE-BACKED GUIDANCE" : "WELLNESS GUIDANCE"}</Text>
+        {displayReport.safety.level !== "wellness" ? <Text style={styles.safetyText}>{displayReport.safety.message}</Text> : null}
+        <Text style={styles.coachText}>{displayReport.summary}</Text>
+        {displayReport.observations.map((observation) => (
+          <View key={observation.id} style={styles.guidanceItem}>
+            <Text style={styles.guidanceTitle}>What was visible</Text>
+            <Text style={styles.guidanceBody}>{observation.text}</Text>
+          </View>
+        ))}
+        {displayReport.actions.map((action) => (
+          <View key={action.id} style={styles.guidanceItem}>
+            <Text style={styles.guidanceTitle}>{action.title}</Text>
+            <Text style={styles.guidanceBody}>{action.instruction}</Text>
+            <Text style={styles.guidanceRationale}>{action.rationale}</Text>
+          </View>
+        ))}
+        {displayReport.limitations.map((limitation) => <Text key={limitation} style={styles.sourceText}>{limitation}</Text>)}
+        <Text style={styles.sourceHeading}>Sources used</Text>
+        {displayReport.sources.map((source) => <Text key={source.id} style={styles.sourceText}>{source.publisher} · {source.title}{"\n"}{source.url}</Text>)}
+        <Text style={styles.providerText}>{displayReport.speechProvider === "omni" ? `OMNI · ${displayReport.model}` : `Reviewed sources · ${displayReport.model}`}</Text>
+      </View>
+
+      {coachCaption && !guidanceReport ? (
         <View style={styles.coachCard}>
           <Text style={styles.coachLabel}>LAST COACH NOTE</Text>
           <Text style={styles.coachText}>{coachCaption}</Text>

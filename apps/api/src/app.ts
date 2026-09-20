@@ -5,8 +5,9 @@ import { VIEWS, coachTurnMetaSchema, guidanceReportSchema, liveFinalizeMetaSchem
 import { attachCoachVoice } from "./coachVoice.js";
 import { runGuidanceAnalysis, runGuidanceSpeech, type GuidanceModelInput } from "./guidanceModel.js";
 import { validateGuidanceDraft } from "./guidancePolicy.js";
-import { ALLOWED_AUDIO, ALLOWED_IMAGE, LIMITS } from "./limits.js";
+import { ALLOWED_IMAGE, LIMITS, acceptableAudio } from "./limits.js";
 import { LiveSessionStore } from "./liveSession.js";
+import { localCoachText, localWellnessCore } from "./localGuidance.js";
 import { measurePoseImages, type PoseImage, type ScanPoseResult } from "./measureScan.js";
 import { runOmniTurn } from "./omni.js";
 import { resolveProviderConfig, type ProviderConfig } from "./provider.js";
@@ -45,6 +46,29 @@ function narration(core: ReturnType<typeof validateGuidanceDraft>) {
   ].filter(Boolean).join(" ");
 }
 
+function assembleGuidanceReport(input: {
+  requestId: string;
+  core: ReturnType<typeof validateGuidanceDraft>;
+  pose: ScanPoseResult;
+  voice: { audioBase64?: string; audioMime?: string };
+  config: ProviderConfig;
+  startedAt: number;
+  degraded?: boolean;
+}) {
+  return guidanceReportSchema.parse({
+    requestId: input.requestId,
+    ...input.core,
+    measurements: input.pose.measurements,
+    pose: { source: input.pose.source, viewsWithPose: input.pose.viewsWithPose },
+    ...input.voice,
+    speechProvider: input.voice.audioBase64 && input.config.mode === "omni" ? "omni" : "none",
+    providerMode: input.config.mode,
+    model: input.config.mode === "omni" ? input.config.model : "local-evidence",
+    latencyMs: Date.now() - input.startedAt,
+    degraded: input.degraded || (input.config.nativeAudioExpected && !input.voice.audioBase64) || undefined,
+  });
+}
+
 export function createApp(dependencies: Dependencies = {}) {
   const app = new Hono();
   const activeTurns = new Map<string, AbortController>();
@@ -55,6 +79,59 @@ export function createApp(dependencies: Dependencies = {}) {
   const analyze = dependencies.analyze ?? runGuidanceAnalysis;
   const speak = dependencies.speak ?? runGuidanceSpeech;
   const measureScan = dependencies.measureScan ?? measurePoseImages;
+
+  async function produceGuidance(input: {
+    requestId: string;
+    scanId: string;
+    images: GuidanceModelInput["images"];
+    audioBase64: string;
+    audioFormat: string;
+    captureNotes: string[];
+    locale: string;
+    pose: ScanPoseResult;
+    config: ProviderConfig;
+    signal: AbortSignal;
+    startedAt: number;
+  }) {
+    try {
+      const draft = await analyze({
+        requestId: input.requestId,
+        scanId: input.scanId,
+        images: input.images,
+        audioBase64: input.audioBase64,
+        audioFormat: input.audioFormat,
+        measurements: input.pose.measurements,
+        captureNotes: input.captureNotes,
+        locale: input.locale,
+      }, input.config, input.signal);
+      const core = validateGuidanceDraft(draft, input.pose.measurements);
+      const voice = await speak(narration(core), input.config, input.signal).catch((error) => {
+        if (input.signal.aborted) throw error;
+        console.warn("guidance_speech_unavailable", input.requestId);
+        return {} as { audioBase64?: string; audioMime?: string };
+      });
+      return assembleGuidanceReport({
+        requestId: input.requestId,
+        core,
+        pose: input.pose,
+        voice,
+        config: input.config,
+        startedAt: input.startedAt,
+      });
+    } catch (error) {
+      if ((error instanceof Error && error.name === "AbortError") || input.signal.aborted) throw error;
+      console.warn("guidance_fallback_local", input.requestId, error instanceof Error ? error.message : error);
+      return assembleGuidanceReport({
+        requestId: input.requestId,
+        core: localWellnessCore(input.pose.measurements),
+        pose: input.pose,
+        voice: {},
+        config: { ...input.config, mode: "unconfigured", nativeAudioExpected: false },
+        startedAt: input.startedAt,
+        degraded: true,
+      });
+    }
+  }
 
   app.use("/*", cors({
     origin: ["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -164,7 +241,7 @@ export function createApp(dependencies: Dependencies = {}) {
       return c.json({ error: "invalid_meta" }, 400);
     }
     if (!(audio instanceof File)) return c.json({ error: "missing_media", requestId: meta.requestId }, 400);
-    if ((!ALLOWED_AUDIO.has(audio.type) && !audio.type.startsWith("audio/")) || audio.size > LIMITS.audioBytes) {
+    if (!acceptableAudio(audio)) {
       return c.json({ error: "invalid_audio", requestId: meta.requestId }, 400);
     }
     const samples = liveSessions.selectLatestByView(scanId, VIEWS);
@@ -180,49 +257,30 @@ export function createApp(dependencies: Dependencies = {}) {
     const config = provider();
     try {
       const pose = await measureScan(poseInputs);
-      const draft = await analyze({
+      const report = await produceGuidance({
         requestId: meta.requestId,
         scanId,
         images: samples.map((sample) => ({ view: sample.view, base64: sample.imageBase64, mime: sample.imageMime })),
         audioBase64: Buffer.from(await audio.arrayBuffer()).toString("base64"),
         audioFormat: audio.type,
-        measurements: pose.measurements,
         captureNotes: [
           "Continuous live camera scan; labels represent temporal scan phases.",
           pose.source === "none" ? "Pose landmarks were unavailable for this scan." : `Pose source ${pose.source}.`,
           ...(meta.captureNotes ?? []),
         ],
         locale: meta.locale,
-      }, config, signal);
-      const core = validateGuidanceDraft(draft, pose.measurements);
-      const voice = await speak(narration(core), config, signal).catch((error) => {
-        if (controller.signal.aborted) throw error;
-        console.warn("guidance_speech_unavailable", meta.requestId);
-        return {} as { audioBase64?: string; audioMime?: string };
+        pose,
+        config,
+        signal,
+        startedAt,
       });
-      const report = guidanceReportSchema.parse({
-        requestId: meta.requestId,
-        ...core,
-        measurements: pose.measurements,
-        pose: { source: pose.source, viewsWithPose: pose.viewsWithPose },
-        ...voice,
-        speechProvider: voice.audioBase64 && config.mode === "omni" ? "omni" : "none",
-        providerMode: config.mode,
-        model: config.model,
-        latencyMs: Date.now() - startedAt,
-        degraded: config.nativeAudioExpected && !voice.audioBase64 ? true : undefined,
-      });
-      console.info("live_guidance_report", meta.requestId, config.mode, config.model, report.latencyMs, report.speechProvider);
+      console.info("live_guidance_report", meta.requestId, report.providerMode, report.model, report.latencyMs, report.speechProvider);
       liveSessions.close(scanId);
       return c.json(report);
     } catch (error) {
       const name = error instanceof Error ? error.name : "";
-      const message = error instanceof Error ? error.message : "guidance_failed";
-      if (name === "GuidanceConfigError") return c.json({ error: "guidance_not_configured", requestId: meta.requestId }, 503);
       if (name === "AbortError" || signal.aborted) return c.json({ error: "cancelled", requestId: meta.requestId }, 409);
-      if (name === "GuidanceModelResponseError" || ["forbidden_medical_claim", "invented_numeric_finding", "unknown_evidence_source", "unknown_safety_signal"].includes(message)) {
-        return c.json({ error: "guidance_invalid", requestId: meta.requestId }, 502);
-      }
+      const message = error instanceof Error ? error.message : "guidance_failed";
       console.error("live_guidance_failed", meta.requestId, config.mode, name || "Error", message);
       return c.json({ error: "guidance_failed", requestId: meta.requestId }, 502);
     } finally {
@@ -257,7 +315,7 @@ export function createApp(dependencies: Dependencies = {}) {
       const image = file as File;
       return !ALLOWED_IMAGE.has(image.type) || image.size > LIMITS.imageBytes;
     })) return c.json({ error: "invalid_image", requestId: meta.requestId }, 400);
-    if ((!ALLOWED_AUDIO.has(audio.type) && !audio.type.startsWith("audio/")) || audio.size > LIMITS.audioBytes) {
+    if (!acceptableAudio(audio)) {
       return c.json({ error: "invalid_audio", requestId: meta.requestId }, 400);
     }
 
@@ -277,49 +335,29 @@ export function createApp(dependencies: Dependencies = {}) {
         ...livePoseImages(liveSessions, meta.scanId),
         ...images.map((image) => ({ view: image.view, bytes: Buffer.from(image.base64, "base64") })),
       ]);
-      const draft = await analyze({
+      const report = await produceGuidance({
         requestId: meta.requestId,
         scanId: meta.scanId,
         images,
         audioBase64: Buffer.from(await audio.arrayBuffer()).toString("base64"),
         audioFormat: audio.type,
-        measurements: pose.measurements,
         captureNotes: [
           ...(meta.captureNotes ?? []),
           pose.source === "none" ? "Pose landmarks were unavailable for this scan." : `Pose source ${pose.source}.`,
         ],
         locale: meta.locale,
-      }, config, signal);
-      const core = validateGuidanceDraft(draft, pose.measurements);
-      const voice = await speak(narration(core), config, signal).catch((error) => {
-        if (controller.signal.aborted) throw error;
-        console.warn("guidance_speech_unavailable", meta.requestId);
-        return {} as { audioBase64?: string; audioMime?: string };
+        pose,
+        config,
+        signal,
+        startedAt,
       });
-      const report = guidanceReportSchema.parse({
-        requestId: meta.requestId,
-        ...core,
-        measurements: pose.measurements,
-        pose: { source: pose.source, viewsWithPose: pose.viewsWithPose },
-        ...voice,
-        speechProvider: voice.audioBase64 && config.mode === "omni" ? "omni" : "none",
-        providerMode: config.mode,
-        model: config.model,
-        latencyMs: Date.now() - startedAt,
-        degraded: config.nativeAudioExpected && !voice.audioBase64 ? true : undefined,
-      });
-      console.info("guidance_report", meta.requestId, config.mode, config.model, report.latencyMs, report.speechProvider);
+      console.info("guidance_report", meta.requestId, report.providerMode, report.model, report.latencyMs, report.speechProvider);
       liveSessions.close(meta.scanId);
       return c.json(report);
     } catch (error) {
       const name = error instanceof Error ? error.name : "";
-      const message = error instanceof Error ? error.message : "guidance_failed";
-      if (name === "GuidanceConfigError") return c.json({ error: "guidance_not_configured", requestId: meta.requestId }, 503);
       if (name === "AbortError" || signal.aborted) return c.json({ error: "cancelled", requestId: meta.requestId }, 409);
-      if (name === "GuidanceModelResponseError" || ["forbidden_medical_claim", "invented_numeric_finding", "unknown_evidence_source", "unknown_safety_signal"].includes(message)) {
-        console.warn("guidance_invalid", meta.requestId, name || "Error", message);
-        return c.json({ error: "guidance_invalid", requestId: meta.requestId }, 502);
-      }
+      const message = error instanceof Error ? error.message : "guidance_failed";
       console.error("guidance_failed", meta.requestId, config.mode, name || "Error", message);
       return c.json({ error: "guidance_failed", requestId: meta.requestId }, 502);
     } finally {
@@ -391,33 +429,44 @@ export function createApp(dependencies: Dependencies = {}) {
     const audio = body.audio;
     if (!(image instanceof File) || !(audio instanceof File)) return c.json({ error: "missing_media" }, 400);
     if (!ALLOWED_IMAGE.has(image.type) || image.size > LIMITS.imageBytes) return c.json({ error: "invalid_image" }, 400);
-    if ((!ALLOWED_AUDIO.has(audio.type) && !audio.type.startsWith("audio/")) || audio.size > LIMITS.audioBytes) return c.json({ error: "invalid_audio" }, 400);
+    if (!acceptableAudio(audio)) return c.json({ error: "invalid_audio" }, 400);
     activeTurns.get(meta.scanId)?.abort();
     const controller = new AbortController();
     activeTurns.set(meta.scanId, controller);
+    const config = provider();
     try {
       const imageBytes = Buffer.from(await image.arrayBuffer());
       const stage = (VIEWS as readonly string[]).includes(meta.stage) ? meta.stage as ViewId : "front";
       const pose = await measureScan([{ view: stage, bytes: imageBytes }]);
-      const result = attachCoachVoice(await runOmniTurn({
-        requestId: meta.requestId,
-        stage: meta.stage,
-        measurementsJson: JSON.stringify(pose.measurements),
-        captureNotes: [
-          ...(meta.captureNotes ?? []),
-          pose.source === "none" ? "Pose landmarks were unavailable for this frame." : `Pose source ${pose.source}.`,
-        ],
-        imageBase64: imageBytes.toString("base64"),
-        imageMime: image.type,
-        audioBase64: Buffer.from(await audio.arrayBuffer()).toString("base64"),
-        audioFormat: audio.type,
-      }, controller.signal));
-      return c.json({ requestId: meta.requestId, ...result, measurements: pose.measurements });
+      try {
+        const result = attachCoachVoice(await runOmniTurn({
+          requestId: meta.requestId,
+          stage: meta.stage,
+          measurementsJson: JSON.stringify(pose.measurements),
+          captureNotes: [
+            ...(meta.captureNotes ?? []),
+            pose.source === "none" ? "Pose landmarks were unavailable for this frame." : `Pose source ${pose.source}.`,
+          ],
+          imageBase64: imageBytes.toString("base64"),
+          imageMime: image.type,
+          audioBase64: Buffer.from(await audio.arrayBuffer()).toString("base64"),
+          audioFormat: audio.type,
+        }, controller.signal), config.mode);
+        return c.json({ requestId: meta.requestId, ...result, measurements: pose.measurements });
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") throw error;
+        console.warn("omni_turn_fallback_local", meta.requestId, error instanceof Error ? error.message : error);
+        const result = attachCoachVoice({
+          text: localCoachText(pose.measurements),
+          model: "local-evidence",
+          degraded: true,
+        }, "unconfigured");
+        return c.json({ requestId: meta.requestId, ...result, measurements: pose.measurements });
+      }
     } catch (error) {
       const name = error instanceof Error ? error.name : "";
-      const message = error instanceof Error ? error.message : "omni_failed";
-      if (name === "OmniConfigError") return c.json({ error: "omni_not_configured", requestId: meta.requestId }, 503);
       if (name === "AbortError") return c.json({ error: "cancelled", requestId: meta.requestId }, 409);
+      const message = error instanceof Error ? error.message : "omni_failed";
       console.error("omni_turn_failed", meta.requestId, message);
       return c.json({ error: "omni_failed", requestId: meta.requestId }, 502);
     } finally {

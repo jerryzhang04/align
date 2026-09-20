@@ -39,6 +39,14 @@ describe("contentParts", () => {
   it("omits audio entirely when audio is not included", () => {
     expect(contentParts(input, false).some((p) => p.type === "input_audio")).toBe(false);
   });
+
+  it("sends raw base64 audio to OpenRouter-style hosts", () => {
+    process.env.OMNI_BASE_URL = "https://openrouter.ai/api/v1";
+    const audioPart = contentParts(input, true).find((p) => p.type === "input_audio") as {
+      input_audio: { data: string; format: string };
+    };
+    expect(audioPart.input_audio.data).toBe("AUDIODATA");
+  });
 });
 
 describe("audioOutputEnabled", () => {

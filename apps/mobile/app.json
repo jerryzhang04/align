@@ -11,7 +11,11 @@
       "bundleIdentifier": "com.align.htn26",
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "Align connects to your local coaching server during development.",
+        "NSMicrophoneUsageDescription": "Allow Align to record a short question for your posture coach.",
+        "NSCameraUsageDescription": "Allow Align to frame and capture your guided posture scan.",
+        "NSBonjourServices": ["_http._tcp.", "_https._tcp."],
         "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
           "NSAllowsLocalNetworking": true
         }
       }

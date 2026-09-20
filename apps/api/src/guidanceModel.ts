@@ -1,3 +1,4 @@
+import { encodeAudioData } from "./omni.js";
 import { playableOmniAudio } from "./omniAudio.js";
 import { modelGuidanceDraftSchema, type Measurement, type ModelGuidanceDraft, type ViewId } from "@align/contracts";
 import { evidencePromptContext } from "./evidence.js";
@@ -50,7 +51,7 @@ export function buildAnalysisRequest(input: GuidanceModelInput, config: Provider
   content.push({
     type: "input_audio",
     input_audio: {
-      data: `data:audio/${formatAudio(input.audioFormat)};base64,${input.audioBase64}`,
+      data: encodeAudioData({ audioBase64: input.audioBase64, audioFormat: input.audioFormat }, config.baseUrl),
       format: formatAudio(input.audioFormat),
     },
   });

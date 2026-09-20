@@ -25,6 +25,14 @@ test("selectLanAddress falls back to another private adapter", () => {
   assert.equal(address, "10.0.0.22");
 });
 
+test("selectLanAddress skips Windows virtual adapters in favor of Wi-Fi", () => {
+  const address = selectLanAddress({
+    "vEthernet (WSL)": [{ address: "172.29.160.1", family: "IPv4", internal: false }],
+    "Wi-Fi": [{ address: "192.168.1.44", family: "IPv4", internal: false }],
+  });
+  assert.equal(address, "192.168.1.44");
+});
+
 test("selectLanAddress explains when no phone-reachable address exists", () => {
   assert.throws(
     () => selectLanAddress({ lo0: [{ address: "127.0.0.1", family: "IPv4", internal: true }] }),

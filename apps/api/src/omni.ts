@@ -1,5 +1,6 @@
 import { playableOmniAudio } from "./omniAudio.js";
 import { LIMITS } from "./limits.js";
+import { isSponsoredOmniModel, isYibuBaseUrl } from "./omniModels.js";
 import { appendAuditRecord } from "./usageLog.js";
 
 export type OmniTurnInput = {
@@ -26,7 +27,7 @@ function env(name: string, fallback = ""): string {
 }
 
 export function omniConfigured(): boolean {
-  return Boolean(env("OMNI_API_KEY")) && sponsoredCall() && omniModel() === "qwen3.5-omni-plus";
+  return Boolean(env("OMNI_API_KEY")) && (sponsoredCall() ? isSponsoredOmniModel(omniModel()) : true);
 }
 
 export function omniModel(): string {
@@ -48,11 +49,7 @@ export function audioOutputEnabled(): boolean {
 /** Sponsored YibuAPI credit must be accounted for; other providers must not be
  * mislabelled as yibuapi in the ledger, so only log calls to that host. */
 function sponsoredCall(): boolean {
-  try {
-    return /(^|\.)yibuapi\.com$/i.test(new URL(baseUrl()).hostname);
-  } catch {
-    return false;
-  }
+  return isYibuBaseUrl(baseUrl());
 }
 
 function logTurn(input: {
@@ -120,11 +117,12 @@ function userText(input: OmniTurnInput): string {
  * fails the whole request:
  *   - YibuAPI / Qwen Omni expect a data: URI (matches the organizers' own
  *     yibu_http.py helper, which sends `data:audio/wav;base64,...`).
- * The application supports only YibuAPI / Qwen Omni, which expects a data URI.
+ *   - OpenAI / OpenRouter expect raw base64.
  */
-export function encodeAudioData(input: Pick<OmniTurnInput, "audioBase64" | "audioFormat">): string {
+export function encodeAudioData(input: Pick<OmniTurnInput, "audioBase64" | "audioFormat">, endpoint = baseUrl()): string {
   const format = audioFormat(input.audioFormat);
-  return `data:audio/${format};base64,${input.audioBase64}`;
+  if (isYibuBaseUrl(endpoint)) return `data:audio/${format};base64,${input.audioBase64}`;
+  return input.audioBase64;
 }
 
 export function contentParts(input: OmniTurnInput, includeAudio: boolean) {

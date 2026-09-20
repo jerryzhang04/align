@@ -67,4 +67,8 @@ describe("encodeAudioData", () => {
     expect(encodeAudioData(audio)).toBe("data:audio/wav;base64,AUDIOB64");
   });
 
+  it("sends raw base64 audio to OpenRouter-style hosts", () => {
+    process.env.OMNI_BASE_URL = "https://openrouter.ai/api/v1";
+    expect(encodeAudioData(audio)).toBe("AUDIOB64");
+  });
 });

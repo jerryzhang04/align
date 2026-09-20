@@ -222,6 +222,24 @@ describe("guidance API", () => {
   });
 });
 
+it("returns evidence-backed local guidance when OMNI is unavailable", async () => {
+  const app = api({
+    provider: () => ({ ...provider, configured: false, mode: "unconfigured", nativeAudioExpected: false }),
+    analyze: async () => {
+      const error = new Error("guidance_not_configured");
+      error.name = "GuidanceConfigError";
+      throw error;
+    },
+  });
+  const response = await app.request("/v1/guidance/report", { method: "POST", body: validForm() });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.model).toBe("local-evidence");
+  expect(body.speechProvider).toBe("none");
+  expect(body.actions.length).toBeGreaterThan(0);
+  expect(body.summary).not.toMatch(/diagnos|scoliosis/i);
+});
+
 it("keeps valid guidance when the optional speech service fails", async () => {
   const app = api({
     provider: () => ({ ...provider, nativeAudioExpected: true }),
