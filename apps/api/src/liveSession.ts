@@ -174,6 +174,16 @@ export class LiveSessionStore {
     });
   }
 
+  /** All retained samples grouped by guided phase, for pose aggregation. */
+  listByView(scanId: string): Record<ViewId, LiveFrameSample[]> {
+    this.expire();
+    const grouped: Record<ViewId, LiveFrameSample[]> = { front: [], right: [], back: [], left: [] };
+    for (const frame of this.sessions.get(scanId)?.frames ?? []) {
+      grouped[frame.view].push(publicFrame(frame));
+    }
+    return grouped;
+  }
+
   /** Selects the turn inputs then immediately drops the session's retained data. */
   finalize(scanId: string, maxFrames = this.maxFramesForTurn): LiveFrameSample[] {
     const frames = this.selectFrames(scanId, maxFrames);

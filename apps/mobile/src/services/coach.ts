@@ -3,9 +3,11 @@ import {
   coachTurnResponseSchema,
   guidanceReportSchema,
   healthResponseSchema,
+  poseMeasureResponseSchema,
   type CoachTurnResponse,
   type GuidanceReport,
   type HealthResponse,
+  type PoseMeasureResponse,
   type ViewId,
 } from "@align/contracts";
 import type { Captures } from "../lib/captureFlow";
@@ -37,7 +39,7 @@ export async function askCoach(input: {
     scanId: input.scanId,
     stage: input.stage,
     measurements: [],
-    captureNotes: ["Native guided capture; numeric native pose measurements are not connected yet."],
+    captureNotes: ["Native guided capture."],
   }));
   form.append("image", { uri: input.imageUri, name: "coach-frame.jpg", type: "image/jpeg" } as unknown as Blob);
   form.append("audio", { uri: input.audioUri, name: "question.m4a", type: "audio/mp4" } as unknown as Blob);
@@ -69,7 +71,7 @@ export async function requestGuidance(input: {
     scanId: input.scanId,
     views: ["front", "right", "back", "left"],
     measurements: [],
-    captureNotes: ["Native four-view guided capture; verified numeric pose measurements are not connected yet."],
+    captureNotes: ["Native four-view guided capture."],
     locale: "en-CA",
   }));
   for (const view of ["front", "right", "back", "left"] as const) {
@@ -87,4 +89,32 @@ export async function requestGuidance(input: {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(typeof payload?.error === "string" ? payload.error : "guidance_failed");
   return guidanceReportSchema.parse(payload);
+}
+
+export async function requestPoseMeasurements(input: {
+  requestId: string;
+  scanId: string;
+  captures: Captures;
+  signal?: AbortSignal;
+}): Promise<PoseMeasureResponse> {
+  const form = new FormData();
+  form.append("meta", JSON.stringify({
+    requestId: input.requestId,
+    scanId: input.scanId,
+    views: ["front", "right", "back", "left"],
+  }));
+  for (const view of ["front", "right", "back", "left"] as const) {
+    const uri = input.captures[view];
+    if (!uri) throw new Error("missing_capture");
+    form.append(view, { uri, name: `${view}.jpg`, type: "image/jpeg" } as unknown as Blob);
+  }
+  const response = await fetchWithTimeout(`${apiUrl}/v1/pose/measure`, {
+    method: "POST",
+    body: form,
+    headers: headers(),
+    signal: input.signal,
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(typeof payload?.error === "string" ? payload.error : "pose_failed");
+  return poseMeasureResponseSchema.parse(payload);
 }

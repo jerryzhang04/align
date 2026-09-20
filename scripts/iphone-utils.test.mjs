@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 import {
   createApiCommand,
   createLaunchEnvironments,
@@ -59,8 +60,8 @@ test("createMobileCommandArgs selects Expo Go and the development client explici
 
 test("createApiCommand avoids an npm lifecycle wrapper so Ctrl+C stays quiet", () => {
   assert.deepEqual(createApiCommand("/repo"), {
-    command: "/repo/node_modules/.bin/tsx",
+    command: resolve("/repo", "node_modules/.bin/tsx"),
     args: ["watch", "src/index.ts"],
-    cwd: "/repo/apps/api",
+    cwd: resolve("/repo", "apps/api"),
   });
 });

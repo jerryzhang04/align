@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useFocusEffect } from "expo-router";
 import { SymbolView } from "expo-symbols";
@@ -81,13 +81,21 @@ export default function HomeScreen() {
           <Text style={styles.privateText}>Stored on this iPhone</Text>
         </View>
         {sessions.length ? sessions.map((session) => (
-          <View key={session.id} style={styles.sessionCard}>
+          <Pressable
+            key={session.id}
+            accessibilityRole="button"
+            accessibilityLabel={`Open session from ${new Date(session.createdAt).toLocaleDateString()}`}
+            onPress={() => router.push({ pathname: "/session/[id]", params: { id: session.id } })}
+            style={styles.sessionCard}
+          >
             <View style={styles.sessionIcon}><SymbolView name="figure.stand" size={22} tintColor={colors.tealDark} /></View>
             <View style={styles.sessionCopy}>
               <Text style={styles.sessionDate}>{new Date(session.createdAt).toLocaleDateString(undefined, { month: "long", day: "numeric" })}</Text>
-              <Text style={styles.sessionMeta}>{Object.keys(session.captures).length} of 4 views captured</Text>
+              <Text style={styles.sessionMeta}>
+                {Object.keys(session.captures).length} of 4 views · {session.measurements.length} measurement{session.measurements.length === 1 ? "" : "s"}
+              </Text>
             </View>
-          </View>
+          </Pressable>
         )) : (
           <View style={styles.emptyCard}>
             <Text style={styles.emptyTitle}>Your first baseline starts here.</Text>

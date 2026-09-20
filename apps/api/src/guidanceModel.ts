@@ -27,7 +27,8 @@ function systemPrompt() {
   return [
     "You are Align, a conservative wellness capture guide.",
     "Review the ordered phone images together with the user's actual spoken goal.",
-    "Describe only tentative visible patterns. Never diagnose, identify a disease, infer pain causality, or invent an angle, distance, score, or percentage.",
+    "Describe only tentative visible patterns. Never diagnose, identify a disease, or infer pain causality.",
+    "Never invent an angle, distance, score, or percentage. You may quote verified measurements supplied in the user message.",
     "Use only the evidence IDs below. Every action must include at least one applicable sourceIds entry.",
     "Recognized urgent safetySignalIds: bladder_bowel_change, saddle_numbness, bilateral_limb_weakness, significant_trauma, chest_pain.",
     "Recognized non-urgent safetySignalIds: persistent_pain, recurring_numbness, progressive_weakness, functional_limitation.",
@@ -60,6 +61,7 @@ export function buildAnalysisRequest(input: GuidanceModelInput, config: Provider
       `Capture notes: ${input.captureNotes.join("; ") || "none"}`,
       `Verified measurements: ${JSON.stringify(input.measurements)}`,
       "Answer the user's spoken goal using all four views. If verified measurements is empty, make no numerical posture claims.",
+      "If verified measurements is not empty, you may quote only those exact values. Do not invent angles, millimetres, scores, or percentages.",
     ].join("\n"),
   });
   return {

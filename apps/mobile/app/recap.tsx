@@ -5,6 +5,7 @@ import * as Haptics from "expo-haptics";
 import { useAudioPlayer } from "expo-audio";
 import { SymbolView } from "expo-symbols";
 import { PrimaryButton } from "../src/components/PrimaryButton";
+import { MeasurementList } from "../src/components/MeasurementList";
 import { CAPTURE_VIEWS, captureProgress } from "../src/lib/captureFlow";
 import { discardLocalFiles, finalizeCaptures } from "../src/services/captures";
 import { cacheCoachAudio } from "../src/services/audioFile";
@@ -13,7 +14,7 @@ import { useScan } from "../src/state/ScanContext";
 import { colors, radius, spacing } from "../src/theme";
 
 export default function RecapScreen() {
-  const { scanId, captures, coachCaption, guidanceReport, reset } = useScan();
+  const { scanId, captures, cloudCoachEnabled, coachCaption, guidanceReport, measurements, reset } = useScan();
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const reportAudioFile = useRef<string | null>(null);
@@ -43,7 +44,7 @@ export default function RecapScreen() {
     setSaving(true);
     try {
       await finalizeCaptures(scanId, captures, async (persistent) => {
-        await saveSession({ id: scanId, createdAt: new Date().toISOString(), captures: persistent, coachCaption, guidanceReport });
+        await saveSession({ id: scanId, createdAt: new Date().toISOString(), captures: persistent, coachCaption, guidanceReport, measurements: measurements.length ? measurements : guidanceReport?.measurements ?? [] });
       });
       setSaved(true);
     } catch {
@@ -73,10 +74,10 @@ export default function RecapScreen() {
         ))}
       </View>
 
-      <View style={styles.truthCard}>
-        <View style={styles.truthHeader}><SymbolView name="ruler" size={22} tintColor={colors.tealDark} /><Text style={styles.truthTitle}>Measurement status</Text></View>
-        <Text style={styles.truthBody}>Your camera photos are shown above. The coach can review visible patterns and your spoken goal. This scan does not measure posture angles or diagnose a condition.</Text>
-      </View>
+      <MeasurementList
+        measurements={measurements.length ? measurements : guidanceReport?.measurements ?? []}
+        localOnly={!cloudCoachEnabled}
+      />
 
       {guidanceReport ? (
         <View style={styles.coachCard}>
@@ -130,10 +131,6 @@ const styles = StyleSheet.create({
   missingText: { color: colors.muted, fontWeight: "700" },
   captureFooter: { minHeight: 44, paddingHorizontal: spacing.md, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   captureLabel: { color: colors.ink, fontSize: 14, fontWeight: "700" },
-  truthCard: { backgroundColor: colors.tealSoft, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.sm },
-  truthHeader: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  truthTitle: { color: colors.ink, fontSize: 17, fontWeight: "800" },
-  truthBody: { color: "#3D5F57", fontSize: 14, lineHeight: 21 },
   coachCard: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.sm, borderWidth: 1, borderColor: colors.line },
   coachLabel: { color: colors.tealDark, fontSize: 11, fontWeight: "900", letterSpacing: 1.1 },
   coachText: { color: colors.ink, fontSize: 16, lineHeight: 23 },

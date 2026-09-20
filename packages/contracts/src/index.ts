@@ -47,6 +47,7 @@ export const coachTurnResponseSchema = z.object({
   degraded: z.boolean().optional(),
   speechProvider: z.enum(["omni", "none"]),
   limitations: z.array(z.string()).optional(),
+  measurements: z.array(measurementSchema).max(40).default([]),
 });
 export type CoachTurnResponse = z.infer<typeof coachTurnResponseSchema>;
 
@@ -121,6 +122,25 @@ export const liveFinalizeMetaSchema = z.object({
 });
 export type LiveFinalizeMeta = z.infer<typeof liveFinalizeMetaSchema>;
 
+export const poseSourceSchema = z.enum(["movenet-lightning", "none"]);
+
+export const poseMeasureMetaSchema = z.object({
+  requestId: z.string().min(1).max(80),
+  scanId: z.string().min(1).max(80),
+  views: z.tuple([z.literal("front"), z.literal("right"), z.literal("back"), z.literal("left")]),
+});
+export type PoseMeasureMeta = z.infer<typeof poseMeasureMetaSchema>;
+
+export const poseMeasureResponseSchema = z.object({
+  requestId: z.string(),
+  measurements: z.array(measurementSchema).max(40),
+  pose: z.object({
+    source: poseSourceSchema,
+    viewsWithPose: z.array(z.enum(VIEWS)),
+  }),
+});
+export type PoseMeasureResponse = z.infer<typeof poseMeasureResponseSchema>;
+
 export const guidanceReportSchema = z.object({
   requestId: z.string(),
   summary: z.string(),
@@ -133,6 +153,11 @@ export const guidanceReportSchema = z.object({
     signalIds: z.array(z.string()),
   }),
   sources: z.array(evidenceCitationSchema),
+  measurements: z.array(measurementSchema).max(40).default([]),
+  pose: z.object({
+    source: poseSourceSchema,
+    viewsWithPose: z.array(z.enum(VIEWS)),
+  }).default({ source: "none", viewsWithPose: [] }),
   audioBase64: z.string().optional(),
   audioMime: z.string().optional(),
   speechProvider: z.enum(["omni", "none"]),

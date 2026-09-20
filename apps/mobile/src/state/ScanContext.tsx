@@ -1,5 +1,5 @@
-import { createContext, useContext, useMemo, useState, type PropsWithChildren } from "react";
-import type { GuidanceReport, ViewId } from "@align/contracts";
+import { createContext, useContext, useMemo, useState, type Dispatch, type PropsWithChildren, type SetStateAction } from "react";
+import type { GuidanceReport, Measurement, ViewId } from "@align/contracts";
 import type { Captures } from "../lib/captureFlow";
 import { discardCaptures } from "../services/captures";
 
@@ -9,10 +9,12 @@ type ScanState = {
   cloudCoachEnabled: boolean;
   coachCaption: string;
   guidanceReport: GuidanceReport | null;
+  measurements: Measurement[];
   setCapture: (view: ViewId, uri: string) => void;
   setCloudCoachEnabled: (enabled: boolean) => void;
   setCoachCaption: (caption: string) => void;
   setGuidanceReport: (report: GuidanceReport | null) => void;
+  setMeasurements: Dispatch<SetStateAction<Measurement[]>>;
   reset: () => void;
 };
 
@@ -25,6 +27,7 @@ export function ScanProvider({ children }: PropsWithChildren) {
   const [cloudCoachEnabled, setCloudCoachEnabled] = useState(true);
   const [coachCaption, setCoachCaption] = useState("");
   const [guidanceReport, setGuidanceReport] = useState<GuidanceReport | null>(null);
+  const [measurements, setMeasurements] = useState<Measurement[]>([]);
 
   const value = useMemo<ScanState>(() => ({
     scanId,
@@ -32,18 +35,21 @@ export function ScanProvider({ children }: PropsWithChildren) {
     cloudCoachEnabled,
     coachCaption,
     guidanceReport,
+    measurements,
     setCapture: (view, uri) => setCaptures((current) => ({ ...current, [view]: uri })),
     setCloudCoachEnabled,
     setCoachCaption,
     setGuidanceReport,
+    setMeasurements,
     reset: () => {
       void discardCaptures(captures);
       setScanId(newId());
       setCaptures({});
       setCoachCaption("");
       setGuidanceReport(null);
+      setMeasurements([]);
     },
-  }), [captures, cloudCoachEnabled, coachCaption, guidanceReport, scanId]);
+  }), [captures, cloudCoachEnabled, coachCaption, guidanceReport, measurements, scanId]);
 
   return <ScanContext.Provider value={value}>{children}</ScanContext.Provider>;
 }

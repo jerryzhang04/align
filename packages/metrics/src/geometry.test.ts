@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { internalAngleDeg, median, segmentInclinationDeg, toPixel, verticalLeanDeg } from "./geometry.js";
 import { nextHoldPhase } from "./hold.js";
+import { imageKeypointsToPoseFrame } from "./keypoints.js";
 import { LANDMARK, type PoseFrame } from "./landmarks.js";
-import { measureFrame } from "./measure.js";
+import { aggregateMeasurements, measureFrame } from "./measure.js";
 
 function point(x: number, y: number) {
   return { x, y, visibility: 1 };
@@ -62,6 +63,63 @@ describe("measureFrame", () => {
     const measured = measureFrame(frame, "front");
     expect(measured.shoulder_line_tilt).toBeGreaterThan(0);
     expect(measured.head_line_tilt).toBeCloseTo(0, 0);
+  });
+});
+
+describe("imageKeypointsToPoseFrame", () => {
+  it("maps named MoveNet shoulders into MediaPipe indices", () => {
+    const frame = imageKeypointsToPoseFrame(
+      [
+        { name: "left_shoulder", x: 40, y: 80, score: 0.9 },
+        { name: "right_shoulder", x: 160, y: 90, score: 0.9 },
+        { name: "left_hip", x: 60, y: 180, score: 0.8 },
+        { name: "right_hip", x: 140, y: 180, score: 0.8 },
+        { name: "nose", x: 100, y: 40, score: 0.7 },
+      ],
+      200,
+      200,
+    );
+    expect(frame).not.toBeNull();
+    expect(frame!.landmarks[LANDMARK.leftShoulder]).toMatchObject({ x: 0.2, y: 0.4, visibility: 0.9 });
+    expect(measureFrame(frame!, "front").shoulder_line_tilt).toBeGreaterThan(0);
+  });
+
+  it("rejects a skeleton with almost no confident joints", () => {
+    expect(imageKeypointsToPoseFrame([{ name: "nose", x: 10, y: 10, score: 0.1 }], 100, 100)).toBeNull();
+  });
+
+  it("maps unnamed COCO-17 keypoints by index", () => {
+    const keypoints = [
+      { x: 100, y: 20, score: 0.9 },
+      { x: 90, y: 24, score: 0.8 },
+      { x: 110, y: 24, score: 0.8 },
+      { x: 80, y: 30, score: 0.8 },
+      { x: 120, y: 30, score: 0.8 },
+      { x: 70, y: 80, score: 0.9 },
+      { x: 130, y: 82, score: 0.9 },
+    ];
+    const frame = imageKeypointsToPoseFrame(keypoints, 200, 200);
+    expect(frame).not.toBeNull();
+    expect(frame!.landmarks[LANDMARK.leftShoulder]).toMatchObject({ x: 0.35, y: 0.4 });
+    expect(frame!.landmarks[LANDMARK.rightShoulder]).toMatchObject({ x: 0.65, y: 0.41 });
+  });
+});
+
+describe("aggregateMeasurements still protocol", () => {
+  it("can mark a single clear still as usable", () => {
+    const frame = frameFrom({
+      [LANDMARK.leftShoulder]: point(0.35, 0.32),
+      [LANDMARK.rightShoulder]: point(0.65, 0.36),
+      [LANDMARK.leftHip]: point(0.4, 0.58),
+      [LANDMARK.rightHip]: point(0.6, 0.58),
+    });
+    const [shoulder] = aggregateMeasurements([frame], "front", {
+      minSamplesForUsable: 1,
+      extraLimitations: ["Single-frame projection."],
+    });
+    expect(shoulder?.id).toBe("shoulder_line_tilt");
+    expect(shoulder?.quality).toBe("usable");
+    expect(shoulder?.limitations).toContain("Single-frame projection.");
   });
 });
 

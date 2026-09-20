@@ -19,8 +19,9 @@ import { liveScanPhase, advanceLiveScan } from "../src/lib/liveScanFlow";
 import { createOperationGate } from "../src/lib/operationGate";
 import { voiceButtonAction } from "../src/lib/voiceInteraction";
 import { cacheCoachAudio } from "../src/services/audioFile";
+import { mergeMeasurements } from "../src/lib/measurementCopy";
 import { coachErrorMessage } from "../src/services/request";
-import { askCoach, requestGuidance } from "../src/services/coach";
+import { askCoach, requestGuidance, requestPoseMeasurements } from "../src/services/coach";
 import { discardCaptures, discardLocalFiles, persistCapture } from "../src/services/captures";
 import { resetLiveSession, uploadLiveFrame } from "../src/services/liveCoach";
 import { useScan } from "../src/state/ScanContext";
@@ -49,7 +50,7 @@ export default function ScanScreen() {
   const recorderActive = useRef(false);
   const recordingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const coachAudioFile = useRef<string | null>(null);
-  const { scanId, captures, cloudCoachEnabled, coachCaption, setCapture, setCoachCaption, setGuidanceReport, reset } = useScan();
+  const { scanId, captures, cloudCoachEnabled, coachCaption, setCapture, setCoachCaption, setGuidanceReport, setMeasurements, reset } = useScan();
   const [busy, setBusy] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
   const [pictureSize, setPictureSize] = useState<string>();
@@ -63,6 +64,7 @@ export default function ScanScreen() {
   const [error, setError] = useState("");
   const [captureError, setCaptureError] = useState("");
   const [awaitingGuidance, setAwaitingGuidance] = useState(false);
+  const [measuring, setMeasuring] = useState(false);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const player = useAudioPlayer(null);
   const livePhase = liveScanPhase(liveElapsedMs);
@@ -288,6 +290,7 @@ export default function ScanScreen() {
         });
         if (!mounted.current) return;
         setGuidanceReport(report);
+        setMeasurements((current) => mergeMeasurements(current, report.measurements ?? []));
         setCoachCaption(report.summary);
         responseAudio = report.audioBase64;
         responseMime = report.audioMime;
@@ -304,6 +307,7 @@ export default function ScanScreen() {
         });
         if (!mounted.current) return;
         setCoachCaption(response.text);
+        setMeasurements((current) => mergeMeasurements(current, response.measurements ?? []));
         responseAudio = response.audioBase64;
         responseMime = response.audioMime;
       }
@@ -374,15 +378,39 @@ export default function ScanScreen() {
   };
 
   const skipGuidance = async () => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2_500);
+    setMeasuring(true);
     try {
-      await resetLiveSession(scanId, controller.signal);
-    } catch {
-      // The API also expires abandoned live sessions; skipping should never trap the user here.
+      if (cloudCoachEnabled && captures.front && captures.right && captures.back && captures.left) {
+        const measureController = new AbortController();
+        const measureTimeout = setTimeout(() => measureController.abort(), 40_000);
+        try {
+          const pose = await requestPoseMeasurements({
+            requestId: `measure-${Date.now()}`,
+            scanId,
+            captures,
+            signal: measureController.signal,
+          });
+          if (mounted.current) setMeasurements((current) => mergeMeasurements(current, pose.measurements));
+        } catch {
+          // Recap still opens; empty measurements stay honest if pose is unavailable.
+        } finally {
+          clearTimeout(measureTimeout);
+        }
+      }
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 2_500);
+      try {
+        await resetLiveSession(scanId, controller.signal);
+      } catch {
+        // The API also expires abandoned live sessions; skipping should never trap the user here.
+      } finally {
+        clearTimeout(timeout);
+      }
     } finally {
-      clearTimeout(timeout);
-      if (mounted.current) router.replace("/recap");
+      if (mounted.current) {
+        setMeasuring(false);
+        router.replace("/recap");
+      }
     }
   };
 
@@ -436,17 +464,17 @@ export default function ScanScreen() {
               <PrimaryButton
                 label={recording ? "Tap to send" : preparingRecording ? "Starting microphone…" : coachBusy ? "Coach is responding…" : awaitingGuidance ? "Tap to describe your goal" : cloudCoachEnabled ? "Tap to ask coach" : "Coach off"}
                 variant="secondary"
-                disabled={!cloudCoachEnabled || coachBusy || preparingRecording || cameraBusy.current || (!liveStarted && !liveComplete)}
+                disabled={!cloudCoachEnabled || coachBusy || preparingRecording || measuring || cameraBusy.current || (!liveStarted && !liveComplete)}
                 onPress={handleVoicePress}
                 icon={coachBusy || preparingRecording ? <ActivityIndicator color={colors.tealDark} /> : <SymbolView name={recording ? "waveform" : "mic.fill"} size={19} tintColor={recording ? colors.coral : colors.tealDark} />}
               />
             </View>
             {awaitingGuidance ? (
-              <PrimaryButton label="Skip guidance" variant="secondary" disabled={preparingRecording || recording || coachBusy} onPress={() => void skipGuidance()} style={styles.captureAction} />
+              <PrimaryButton label={measuring ? "Measuring…" : "Skip guidance"} variant="secondary" disabled={preparingRecording || recording || coachBusy || measuring} onPress={() => void skipGuidance()} style={styles.captureAction} />
             ) : (
               <PrimaryButton
                 label={liveStarted ? `${busy ? "Sampling" : "Scanning"} ${Math.floor(livePhase.progress * 100)}%` : cameraReady ? "Start live scan" : "Starting camera…"}
-                disabled={!cameraReady || liveStarted || busy || preparingRecording || recording || coachBusy}
+                disabled={!cameraReady || liveStarted || busy || preparingRecording || recording || coachBusy || measuring}
                 onPress={startLiveScan}
                 style={styles.captureAction}
                 icon={liveStarted ? <ActivityIndicator color={colors.white} /> : <SymbolView name="video.fill" size={19} tintColor={colors.white} />}

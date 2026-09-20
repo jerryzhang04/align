@@ -23,6 +23,23 @@ describe("validateGuidanceDraft", () => {
     expect(() => validateGuidanceDraft({ ...safeDraft, observations: [{ ...safeDraft.observations[0], text: "Your shoulder tilt is 12 degrees." }] })).toThrow("invented_numeric_finding");
   });
 
+  it("allows quoting pose-measured degrees when measurements were supplied", () => {
+    const result = validateGuidanceDraft(
+      { ...safeDraft, observations: [{ ...safeDraft.observations[0], text: "Your shoulder tilt is 12 degrees on the front view." }] },
+      [{
+        id: "shoulder_line_tilt",
+        value: 12,
+        unit: "deg",
+        view: "front",
+        definitionVersion: "2026-09-19.1",
+        sampleCount: 1,
+        quality: "limited",
+        limitations: ["test"],
+      }],
+    );
+    expect(result.observations[0]?.text).toContain("12 degrees");
+  });
+
   it("turns urgent signals into deterministic escalation and removes wellness actions", () => {
     const result = validateGuidanceDraft({ ...safeDraft, safetySignalIds: ["bladder_bowel_change"] });
     expect(result.safety.level).toBe("urgent-care");

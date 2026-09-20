@@ -38,6 +38,33 @@ describe("guidance model adapter", () => {
     expect(body).toContain('"type":"json_object"');
   });
 
+  it("interpolates verified measurements into the user text", () => {
+    const request = buildAnalysisRequest({
+      ...input,
+      measurements: [{
+        id: "shoulder_line_tilt",
+        value: 4.2,
+        unit: "deg",
+        view: "front",
+        definitionVersion: "2026-09-19.1",
+        sampleCount: 1,
+        quality: "limited",
+        limitations: ["test"],
+      }],
+    }, {
+      configured: true,
+      mode: "omni",
+      provider: "yibu",
+      model: "qwen3.5-omni-plus",
+      baseUrl: "https://yibuapi.com/v1",
+      apiKey: "key",
+      nativeAudioExpected: false,
+    });
+    expect(JSON.stringify(request)).toContain("4.2");
+    expect(JSON.stringify(request)).toContain("shoulder_line_tilt");
+    expect(JSON.stringify(request)).not.toContain("${JSON.stringify");
+  });
+
   it("parses JSON from a fenced provider response", () => {
     const draft = parseModelDraft(`\`\`\`json\n${JSON.stringify({
       summary: "General review.", observations: [], actions: [], limitations: [], safetySignalIds: [],

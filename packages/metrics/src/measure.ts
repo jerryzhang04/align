@@ -137,10 +137,19 @@ const UNITS: Record<MeasurementId, Measurement["unit"]> = {
   arm_elevation: "deg",
 };
 
+export type AggregateOptions = {
+  /** Hold protocol default is 8. Still-image scans pass 1. */
+  minSamplesForUsable?: number;
+  extraLimitations?: string[];
+};
+
 export function aggregateMeasurements(
   frames: PoseFrame[],
   view: ViewId,
+  options: AggregateOptions = {},
 ): Measurement[] {
+  const minSamplesForUsable = options.minSamplesForUsable ?? 8;
+  const extra = options.extraLimitations ?? [];
   const buckets = new Map<MeasurementId, number[]>();
   for (const frame of frames) {
     const measured = measureFrame(frame, view);
@@ -156,7 +165,7 @@ export function aggregateMeasurements(
     const center = median(values);
     if (center === null) continue;
     const spread = meanAbsoluteDeviation(values, center);
-    const limited = values.length < 8 || spread > (UNITS[id] === "deg" ? 8 : 0.08);
+    const limited = values.length < minSamplesForUsable || spread > (UNITS[id] === "deg" ? 8 : 0.08);
     results.push({
       id,
       value: Number(center.toFixed(UNITS[id] === "deg" ? 1 : 3)),
@@ -165,7 +174,7 @@ export function aggregateMeasurements(
       definitionVersion: DEFINITION_VERSION,
       sampleCount: values.length,
       quality: limited ? "limited" : "usable",
-      limitations: LIMITATIONS[id],
+      limitations: [...LIMITATIONS[id], ...extra],
     });
   }
   return results;

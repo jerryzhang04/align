@@ -73,6 +73,8 @@ describe("LiveSessionStore", () => {
     expect(sessions.selectLatestByView("scan-1", ["front", "right", "back", "left"]).map((sample) => sample.imageBase64)).toEqual([
       "front-new", "right", "back", "left",
     ]);
+    expect(sessions.listByView("scan-1").front).toHaveLength(2);
+    expect(sessions.listByView("scan-1").right.map((sample) => sample.imageBase64)).toEqual(["right"]);
   });
 
   it("uses the most recent sample when a turn can include only one frame", () => {

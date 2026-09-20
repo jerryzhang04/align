@@ -22,6 +22,7 @@ export default function RootLayout() {
         <Stack.Screen name="setup" options={{ title: "Set the scene" }} />
         <Stack.Screen name="scan" options={{ headerShown: false, gestureEnabled: false }} />
         <Stack.Screen name="recap" options={{ title: "Capture recap", gestureEnabled: false }} />
+        <Stack.Screen name="session/[id]" options={{ title: "Saved session" }} />
       </Stack>
     </ScanProvider>
   );

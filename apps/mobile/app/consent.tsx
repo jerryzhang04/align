@@ -32,7 +32,7 @@ export default function ConsentScreen() {
         <View style={styles.rule} />
         <PrivacyRow symbol="waveform" title="Ask the coach" body="Your short recording and sampled scan frames go to OMNI. OMNI answers in text and native speech." />
         <View style={styles.rule} />
-        <PrivacyRow symbol="lock.shield" title="No hidden scoring" body="The prototype does not invent posture angles while native pose measurement is still being connected." />
+        <PrivacyRow symbol="lock.shield" title="Computer vision, not guessed scores" body="Pose landmarks on your photos produce projected angles. OMNI can explain those numbers. It cannot invent millimetres or a diagnosis." />
       </View>
 
       <View style={styles.note}>
