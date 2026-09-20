@@ -74,3 +74,21 @@ only real-OMNI model will misclassify the other four.
 - Do not `git add -A`. Stage your own files so history stays attributable.
 - Do not kill processes you did not start — `npm run iphone` holds port 8788.
 - Verify with `npm test` and `npm run build` before committing; both must pass.
+
+
+<claude-mem-context>
+# Memory Context
+
+# claude-mem status
+
+This project has no memory yet. The current session will seed it; subsequent sessions will receive auto-injected context for relevant past work.
+
+Memory injection starts on your second session in a project.
+
+`/learn-codebase` is available if the user wants to front-load the entire repo into memory in a single pass (~5 minutes on a typical repo, optional). Otherwise memory builds passively as work happens.
+
+Live activity: http://localhost:37701
+How it works: `/how-it-works`
+
+This message disappears once the first observation lands.
+</claude-mem-context>
