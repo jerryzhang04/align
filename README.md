@@ -1,97 +1,101 @@
-# Align
+<p align="center">
+  <img src="apps/mobile/assets/icon.png" alt="Align app icon" width="96" />
+</p>
 
-Align is an iPhone-first guided posture capture prototype for Hack the North 2026. The native Expo app guides one slow continuous camera scan, samples useful frames automatically, records spoken questions, and sends sampled visual context plus audio to OMNI. OMNI owns understanding, response text, and speech. Captions and local capture continue when cloud coaching is unavailable.
+<h1 align="center">Align</h1>
+<p align="center"><strong>See your posture. Know what to try next.</strong></p>
+<p align="center">A voice-enabled posture coach for iPhone · Built for Hack the North 2026</p>
 
-The camera is live. Measurement is not a live skeleton on the viewfinder yet. Align samples JPEGs during one slow rotation, runs MoveNet on those photos on the coaching server, then `packages/metrics` computes projected angles. OMNI can explain those numbers; it cannot invent them. Local-only capture never uploads, so it has no angles. There is no 0–100 score and no millimetres from a phone camera.
+A long coding session ends. Your shoulders feel stiff. “Sit up straight” doesn’t tell you much.
 
-## Current prototype status
+**Align turns four photos and a spoken question into measured posture insights and practical guidance.** The app guides your capture, measures visible alignment, and lets you ask a coach about what the camera sees. OMNI brings the conversation to life; Expo brings it to your phone.
 
-The Expo app and API implement the guided capture loop, OMNI image+audio coaching, server-side pose on uploaded stills, recap measurements, and local session open/delete. Live on-camera joint overlay and hold-to-accept coaching are not built yet. Degree-level demo claims still need a short accuracy check against manual marks on the same frames.
+## Try the experience
 
-## Fastest iPhone workflow
+1. **Set up your phone.** The level indicator helps you position it before scanning.
+2. **Capture four views.** Follow the human outline through front, right, back, and left. Auto capture waits for three steady, aligned samples; **Capture now** stays available throughout.
+3. **See your measurements.** Review the photos alongside supported alignment findings and their confidence limitations.
+4. **Ask in your own words.** Try: *“Looking at my posture, what could I change when working at my desk?”* Hear OMNI’s response and read the captions. You can also request a photo-only analysis.
+5. **Keep your results.** Save the scan locally and revisit it from your history.
 
-Requirements: Node 22.13+, npm, and an iPhone on the same Wi-Fi network as this Mac.
+## What makes Align different
 
-For everyday UI and TypeScript work, use Expo Go:
+**The advice starts with your scan.** A pose model locates body landmarks in the submitted photos. Our measurement engine computes the numbers, and OMNI receives those findings alongside the images and any spoken question.
 
-```text
+**The coach has references to work from.** We match findings with curated ergonomic guidance from OSHA and CCOHS. Report instructions ask the coach to explain why each recommendation fits a visible observation, measured finding, or stated goal, and to cite its supporting source.
+
+**The interaction fits the task.** A level guide helps with setup. A human outline shows the requested view. Haptics confirm captures while you are away from the screen. Spoken answers let you keep the conversation going without typing.
+
+The result is a posture check you can ask questions about, with measurements and references you can inspect.
+
+## OMNI: a coach that sees and listens
+
+Align uses the sponsored **YibuAPI OMNI endpoint**, with **Qwen3.5-Omni-Flash** in our demo configuration.
+
+- **Image and audio input:** an interactive turn includes the current camera frame, the recorded question, and server-computed measurements.
+- **Four-view reasoning:** the final report reviews the labeled photos together, with relevant posture references and an optional spoken goal.
+- **Structured guidance:** reports pass schema, citation-ID, and safety checks before presentation. OMNI then narrates the validated report.
+- **Native speech output:** OMNI supplies the spoken responses. There is no separate speech provider; captions remain available when audio is not returned.
+- **Sponsor integration:** sponsored calls are recorded in the competition’s usage-audit format. Provider credentials stay on the server.
+
+## Expo: the native experience
+
+Expo connects the camera, sensors, microphone, and speaker into one guided workflow.
+
+| Expo capability | What it does in Align |
+| --- | --- |
+| **Camera** | Captures the four views and preview images used for framing and stillness checks. |
+| **Sensors** | Drives the phone-level indicator during setup. |
+| **Audio** | Records spoken questions and plays OMNI’s replies. |
+| **Haptics** | Confirms saved captures and completed results. |
+| **FileSystem + SQLite** | Manages capture files, cached audio, and saved scan history. |
+| **Router** | Connects setup, scanning, results, and past sessions. |
+
+The app runs as a native iPhone development build. Camera work, recording, and playback are coordinated so each step has a clear state and a usable manual path.
+
+## How it works
+
+```mermaid
+flowchart LR
+    A[Expo iPhone app] --> B[Photos + optional spoken question]
+    B --> C[Coaching API]
+    C --> D[MoveNet landmarks]
+    D --> E[Shared measurement engine]
+    E --> F[OMNI + curated references]
+    C --> F
+    F --> G[Guidance + spoken response]
+    G --> A
+```
+
+Pose inference and coaching run on the backend. Saved scan history lives on the device. Users choose whether to enable cloud coaching; local-only capture keeps photos on the phone.
+
+Align provides wellness guidance, not a clinical diagnosis. Its references describe comfortable, task-appropriate positions rather than a universal “perfect posture.” If OMNI is unavailable, the app clearly labels its rule-based scan notes.
+
+## Run it locally
+
+You’ll need **Node.js 22.13+**, npm, an iPhone on the same Wi-Fi network as your computer, and a sponsor-issued OMNI API key.
+
+```sh
 npm install
 cp .env.example .env
+```
+
+In the root `.env`, set `OMNI_API_KEY` and set `OMNI_MODEL=qwen3.5-omni-flash` to match the demo. Then start the API and Expo together:
+
+```sh
 npm run iphone
 ```
 
-Install Expo Go on the iPhone, then scan the QR code printed by Expo. This one command starts both the API and Metro, discovers the Mac's LAN address, and creates a temporary API access token for that run. It never sends OMNI credentials to the app.
+Open the QR code with Expo Go. For the native development build, device setup, and verification commands, see the [development guide](docs/DEVELOPMENT.md).
 
-JavaScript and TypeScript changes appear through Fast Refresh and do not need a native rebuild.
+## Explore the implementation
 
-### Native development build
+| Location | Responsibility |
+| --- | --- |
+| [`apps/mobile`](apps/mobile) | Expo / React Native iPhone app |
+| [`apps/api`](apps/api) | Coaching API, pose inference, OMNI integration, and evidence catalog |
+| [`packages/metrics`](packages/metrics) | Shared measurement and capture-quality logic |
+| [`packages/contracts`](packages/contracts) | Validated request and response schemas |
+| [`apps/web`](apps/web) | Browser development baseline |
 
-Use the development client when testing native behavior or after adding an Expo module. Connect the iPhone by USB, trust the Mac, enable Developer Mode, and run the one-time build:
-
-```text
-npm run iphone:build
-```
-
-Select the connected phone when Expo asks. If iOS installs Align but blocks the first launch, open **Settings → General → VPN & Device Management**, select the Apple Development profile, and tap **Trust**.
-
-After the app is installed and trusted, use this faster daily loop:
-
-```text
-npm run iphone:dev
-```
-
-Both iPhone launchers start the API and Metro together. They discover the Mac's private LAN address, expose the development API on the Mac's network interfaces for that process, and share a fresh temporary API token with the app. Provider credentials remain server-side. Use this launcher only on a trusted development network.
-
-The generated `apps/mobile/ios` directory is intentionally ignored. Expo prebuild regenerates it from `app.json` and the committed config plugin, avoiding machine-specific signing-team metadata in Git.
-
-To use the simulator instead, run `npm run api` and `npm run mobile:ios` in separate terminals.
-
-## Provider configuration
-
-Set credentials only in the ignored root `.env`. Never put provider credentials in `EXPO_PUBLIC_*` variables.
-
-- `OMNI_API_KEY` must be a sponsor-issued YibuAPI credential. Non-Yibu providers and non-OMNI models are rejected by the server.
-- `OMNI_AUDIO_OUTPUT=true` requests native OMNI speech. Set it to `false` only when the Yibu configuration returns text without audio.
-- The current architecture uses OMNI for multimodal understanding and speech. When OMNI returns no audio, the app keeps the response visible as captions.
-- The app remains usable for local capture when cloud coaching is unavailable.
-
-## What is implemented
-
-- Expo Router native navigation for home, consent, setup, live scan, and recap.
-- Rear-camera continuous scan with bounded 750 ms frame sampling and four automatically retained milestone views.
-- Device-motion horizon guide for a level phone on a stand.
-- Tap-to-record voice coaching with the current camera frame attached.
-- OMNI multimodal backend turn with abort, payload bounds, rate limits, and safe error mapping.
-- OMNI-native speech for OMNI's response, with a caption fallback when the model returns text only.
-- Continuous sampled-view plus spoken-goal analysis with structured observations, conservative actions, safety escalation, and server-resolved evidence citations.
-- A versioned evidence catalog backed by WHO, CCOHS, NICE, NHS, and peer-reviewed systematic-review sources.
-- One-command LAN launchers with an ephemeral bearer token for physical-device testing.
-- Disposable image staging until Save, followed by persistent local images and SQLite session summaries, including session detail and delete.
-- Server-side MoveNet Lightning on uploaded JPEGs, mapped into `packages/metrics` for projected tilt/lean/knee angles shown on recap.
-- VoiceOver labels, captions, minimum touch targets, and explicit local/cloud consent.
-- Browser capture and MediaPipe metric work retained in `apps/web` as a development baseline and the live-overlay reference.
-
-## Verify
-
-```text
-npm test
-npm run build
-npx expo-doctor apps/mobile
-```
-
-The latest local verification completed the repository test suite, TypeScript/web builds, an iOS Metro export, Expo Doctor checks, and a signed physical-device Xcode build.
-
-See [PRODUCT.md](PRODUCT.md), [DESIGN.md](DESIGN.md), the [implementation specification](docs/BUILD_SPEC.md), and the [research dossier](docs/research-chinese-scanners-and-omni.md).
-
-## Repository map
-
-```text
-apps/mobile/        Expo / React Native iOS app
-apps/api/           Hono backend, OMNI adapter
-apps/web/           Browser pose and capture baseline
-packages/contracts/ Shared Zod request/response schemas
-packages/metrics/   Pure tested geometry and aggregation logic
-docs/               Build, research, validation, and demo notes
-```
-
-Align is a wellness capture tool, not a medical device. It does not diagnose conditions or claim clinical accuracy.
+The demo revision passes **194 automated tests** and the full workspace build. Read [how posture guidance is grounded](docs/POSTURE_GROUNDING.md), the [product design](PRODUCT.md), or the [OMNI usage-reporting integration](docs/OMNI_USAGE_REPORTING.md) for more detail.
