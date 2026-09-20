@@ -63,4 +63,7 @@ any public repository, issue, or pull request.
 ## Coverage note
 
 Keep the local ledger from the first sponsored-key call onward. Disclose any
-calls made outside the application or before logging was enabled.
+calls made outside the application or before logging was enabled. If
+`artifacts/yibu_api_calls.jsonl` does not exist, no sponsored application call
+has been logged yet — set `OMNI_API_KEY` and run `npm run omni:smoke` (or a
+real coach turn) before generating the summary.

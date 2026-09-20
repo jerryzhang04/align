@@ -2,11 +2,11 @@
 
 Align is an iPhone-first guided posture capture prototype for Hack the North 2026. The native Expo app guides one slow continuous camera scan, samples useful frames automatically, records spoken questions, and sends sampled visual context plus audio to OMNI. OMNI owns understanding, response text, and speech. Captions and local capture continue when cloud coaching is unavailable.
 
-The app is honest by design: it does not display posture angles or scores until a verified native pose pipeline supplies those measurements.
+The camera is live. Measurement is not a live skeleton on the viewfinder yet. Align samples JPEGs during one slow rotation, runs MoveNet on those photos on the coaching server, then `packages/metrics` computes projected angles. OMNI can explain those numbers; it cannot invent them. Local-only capture never uploads, so it has no angles. There is no 0–100 score and no millimetres from a phone camera.
 
 ## Current prototype status
 
-The Expo app and local API are implemented and build successfully for a physical iPhone. The first native development build has been compiled and installed on a test device. The current prototype includes the complete guided capture flow and OMNI integration, but it deliberately withholds posture scores and angles until a validated native pose pipeline is connected.
+The Expo app and API implement the guided capture loop, OMNI image+audio coaching, server-side pose on uploaded stills, recap measurements, and local session open/delete. Live on-camera joint overlay and hold-to-accept coaching are not built yet. Degree-level demo claims still need a short accuracy check against manual marks on the same frames.
 
 ## Fastest iPhone workflow
 
@@ -66,9 +66,10 @@ Set credentials only in the ignored root `.env`. Never put provider credentials 
 - Continuous sampled-view plus spoken-goal analysis with structured observations, conservative actions, safety escalation, and server-resolved evidence citations.
 - A versioned evidence catalog backed by WHO, CCOHS, NICE, NHS, and peer-reviewed systematic-review sources.
 - One-command LAN launchers with an ephemeral bearer token for physical-device testing.
-- Disposable image staging until Save, followed by persistent local images and SQLite session summaries.
+- Disposable image staging until Save, followed by persistent local images and SQLite session summaries, including session detail and delete.
+- Server-side MoveNet Lightning on uploaded JPEGs, mapped into `packages/metrics` for projected tilt/lean/knee angles shown on recap.
 - VoiceOver labels, captions, minimum touch targets, and explicit local/cloud consent.
-- Browser capture and MediaPipe metric work retained in `apps/web` as a development baseline.
+- Browser capture and MediaPipe metric work retained in `apps/web` as a development baseline and the live-overlay reference.
 
 ## Verify
 

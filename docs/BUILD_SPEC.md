@@ -22,16 +22,17 @@ Priority order:
 ## 2. Architecture
 
 ```text
-iPhone camera + device motion + microphone
-  -> Expo app: setup, capture state, local history, captions/playback
-       -> selected JPEG + short recorded question + measured facts
+iPhone live camera + device motion + microphone
+  -> Expo app samples JPEGs during a continuous front/right/back/left rotation
+       -> selected JPEGs + short recorded question
           -> apps/api
-             -> sponsor OMNI: joint image/audio reasoning, response text,
-                and native speech audio when the model returns it
+             -> MoveNet Lightning on JPEGs -> packages/metrics (projected angles)
+             -> sponsor OMNI: image + audio + supplied measurements
+                (explains numbers; never creates them)
              -> caption-only fallback when OMNI returns text only
 
-Native pose pipeline (next gate)
-  -> packages/metrics -> versioned measurements -> results/history/OMNI context
+Live on-camera joint overlay (next gate)
+  -> same PoseFrame + hold machine, drawn on the viewfinder
 ```
 
 Provider credentials exist only in the ignored server `.env`. The mobile app receives a backend URL and optional backend access token, never upstream API keys. The server binds to `127.0.0.1` for local simulator development. Physical-device and deployed demos require HTTPS or an explicitly reachable LAN endpoint.
@@ -66,7 +67,7 @@ Run front -> right -> back -> left. Show an on-camera silhouette/framing guide, 
 
 ### Recap
 
-Show the four real captures and completion count. State clearly when native numeric measurement is not yet connected. Save summaries and durable capture references to SQLite. The home screen lists saved-session summaries; detail and deletion remain a stated next gate. Retaking resets and discards the staged capture rather than mixing protocols.
+Show the four real captures, completion count, and projected measurements from pose on those photos when landmarks were confident. If pose was unavailable (including local-only capture), say so instead of inventing degrees. Save summaries, measurements, and durable capture references to SQLite. The home screen lists saved sessions; opening a session and deleting it (record plus local files) is implemented. Full rescan remains; per-view retake is still a next gate.
 
 ## 4. Expo track value
 
@@ -129,7 +130,7 @@ Before degree-level demo claims, collect repeated consented scans and compare th
 
 Use generated scan IDs; no face recognition is required. Keep unsaved stills in disposable app cache, promote explicitly saved sessions locally, and remove abandoned staged captures. Do not retain raw coach recordings or temporary coach frames after the request completes. Future cloud retention language must match verified OMNI policies before public use.
 
-Users can complete a scan with cloud coaching disabled. Deleting a session must remove its database record and associated local files when deletion UI is added. Do not promise provider-side deletion without confirmed support.
+Users can complete a scan with cloud coaching disabled. Deleting a session removes its database record and associated local files. Do not promise provider-side deletion without confirmed support.
 
 ## 9. Accessibility and native quality
 
@@ -156,19 +157,21 @@ No completion claim is valid without current test/build output and a physical-de
 
 ## 11. Current implementation and next gates
 
-Implemented now: native screens and design system, camera-level setup, four-view capture, race-safe push-to-talk, OMNI adapter, OMNI-audio/caption handling, disposable media staging and cleanup, local SQLite session summaries, persistent saved stills, contracts, and unit tests.
+Implemented now: native screens and design system, camera-level setup, continuous four-view still sampling, race-safe tap-to-talk, OMNI adapter, OMNI-audio/caption handling, disposable media staging and cleanup, local SQLite sessions with detail and delete, contracts, unit tests, and server-side MoveNet → `packages/metrics` measurements on cloud-coach photos.
+
+What “live” means today: the camera preview and scan clock are live; pose is still-image computer vision on sampled JPEGs, not an on-camera skeleton.
 
 Next gates:
 
-1. Launch and visually inspect the app in the target iOS simulator.
-2. Run a real bounded OMNI smoke turn and record the actual payload compatibility, including whether the account returns native audio.
-3. Test camera, device motion, microphone, and playback on a physical iPhone.
-4. Select a native pose route, connect it to the existing metrics package, and keep unsupported findings hidden.
-5. Add session detail/deletion, movement tests, and comparable longitudinal history.
+1. Physical-device pass of the demo checklist, including recap measurements, plus `npm run omni:smoke` on the sponsored key.
+2. File the Yibu usage report from `artifacts/yibu_api_calls.jsonl` (due 2026-09-20 23:59 EDT).
+3. Accuracy check vs manual marks on the same frames before degree-level claims (BUILD_SPEC §7).
+4. Live on-camera pose overlay and hold-to-accept coaching (requires a custom iOS client, not Expo Go).
+5. Per-view retake, visit-to-visit metric compare, movement tests.
 6. Configure EAS project/build profiles only after bundle ID and team ownership are confirmed.
 
 ## 12. Demo narrative
 
-Open Align -> accept the explicit local/cloud choice -> place and level the phone -> step to the floor mark -> capture four guided views -> hold Ask coach and speak -> OMNI considers the live frame and audio -> OMNI's answer plays as speech when available and always appears as a caption -> finish capture -> see the four real views and honest measurement status -> save locally -> return home and see the session.
+Open Align -> accept the explicit local/cloud choice -> place and level the phone -> step to the floor mark -> start one live rotation while Align samples stills -> tap Ask coach and speak -> OMNI considers the current frame, audio, and any pose-measured JSON -> OMNI's answer plays as speech when available and always appears as a caption -> finish capture -> see the four real views and projected measurements or an honest empty state -> save locally -> return home, reopen, or delete the session.
 
 For judging, disclose the exact live model/provider, what Expo modules enable, which observations are measured locally, and which capabilities are future work. Sponsor eligibility and track requirements must be confirmed with current organizer documentation before submission.
